@@ -488,7 +488,7 @@ class GradioOscilloscopeGUI:
         except Exception as e:
             return f"Configuration error: {str(e)}"
 
-    def configure_timebase(self, time_scale_input, time_offset):
+    def configure_timebase(self, time_scale_input):
         if not self.oscilloscope or not self.oscilloscope.is_connected:
             return "Error: Not connected"
         
@@ -503,10 +503,10 @@ class GradioOscilloscopeGUI:
                 display_scale = time_scale_input
             
             with self.io_lock:
-                success = self.oscilloscope.configure_timebase(time_scale, time_offset)
+                success = self.oscilloscope.configure_timebase(time_scale)
             
             if success:
-                return f"Timebase configured: {display_scale} ({time_scale}s/div), offset {time_offset}s"
+                return f"Timebase configured: {display_scale} ({time_scale}s/div)"
             else:
                 return "Timebase configuration failed"
         except Exception as e:
@@ -888,14 +888,14 @@ class GradioOscilloscopeGUI:
                         choices=self.timebase_scales,
                         value=10e-3  # 10 ms in seconds
                     )
-                    time_offset = gr.Number(label="Offset (s)", value=0.0)
+                    #time_offset = gr.Number(label="Offset (s)", value=0.0)
                     timebase_btn = gr.Button("Apply Timebase", variant="primary")
                 
                 timebase_status = gr.Textbox(label="Timebase Status", interactive=False)
                 
                 timebase_btn.click(
                     fn=self.configure_timebase,
-                    inputs=[time_scale, time_offset],
+                    inputs=[time_scale],
                     outputs=[timebase_status]
                 )
                 
@@ -1222,7 +1222,7 @@ def main():
     app = None
     try:
         # Try a higher port range to avoid conflicts
-        start_port = 9000
+        start_port = 7000
         max_attempts = 10
         
         print(f"Looking for an available port starting from {start_port}...")
