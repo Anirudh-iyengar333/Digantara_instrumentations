@@ -1,0 +1,22 @@
+# Python Requirements for Standalone Instrument Controls
+# Recommended: Python 3.12 (fully tested and stable)
+
+# VISA communication
+pyvisa==1.13.0
+pyvisa-py==0.7.2
+
+# Numerical + data
+numpy==1.26.4
+pandas==2.2.2
+
+# Plotting
+matplotlib==3.8.4
+Pillow==10.3.0
+
+# Optional interfaces
+pyserial==3.5    # for RS232/USB-serial instruments
+pyusb==1.2.1     # for USB backend when needed
+
+# Web interface
+gradio==4.44.1
+huggingface_hub==0.25.2
