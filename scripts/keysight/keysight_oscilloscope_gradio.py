@@ -740,9 +740,22 @@ class GradioOscilloscopeGUI:
             
             results.append("Step 1/4: Screenshot...")
             with self.io_lock:
-                screenshot_file = self.oscilloscope.capture_screenshot()
+                # Create custom screenshot directory if needed
+                screenshot_dir = Path(self.save_locations['screenshots'])
+                screenshot_dir.mkdir(parents=True, exist_ok=True)
+                
+                # Generate filename with timestamp
+                timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+                filename = f"scope_screenshot_{timestamp}.png"
+                
+                # Capture screenshot with full path
+                screenshot_file = self.oscilloscope.capture_screenshot(
+                    filename=str(screenshot_dir / filename),
+                    image_format="PNG"
+                )
+                
             if screenshot_file:
-                results.append(f"Screenshot: {Path(screenshot_file).name}")
+                results.append(f"Screenshot saved to: {screenshot_file}")
             
             results.append("Step 2/4: Acquiring data...")
             all_channel_data = {}
