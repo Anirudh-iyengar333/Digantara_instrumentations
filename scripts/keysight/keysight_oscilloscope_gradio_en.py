@@ -1903,41 +1903,45 @@ class GradioOscilloscopeGUI:
     # ========================================================================
 
     def capture_screenshot(self):
-
-        """Capture and save display screenshot"""
-
+        """Capture and save display screenshot to the configured save location"""
         if not self.oscilloscope or not self.oscilloscope.is_connected:
-
             return "Error: Not connected"
 
         try:
-
+            # Ensure the save directory exists
             screenshot_dir = Path(self.save_locations['screenshots'])
-
             screenshot_dir.mkdir(parents=True, exist_ok=True)
-
+            
+            # Generate a timestamp and filename
             timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-
             filename = f"scope_screenshot_{timestamp}.png"
-
-            screenshot_file = self.oscilloscope.capture_screenshot(
-
-                filename=filename,
-
-                image_format="PNG"
-
-            )
-
-            if screenshot_file:
-
-                return f"Screenshot saved: {screenshot_file}"
-
-            else:
-
-                return "Screenshot capture failed"
+            
+            # Create the full path for the screenshot
+            screenshot_path = screenshot_dir / filename
+            
+            # Get the screenshot data directly
+            if not hasattr(self.oscilloscope, '_scpi_wrapper'):
+                return "Error: Oscilloscope SCPI interface not available"
+                
+            # Get the screenshot data
+            try:
+                image_data = self.oscilloscope._scpi_wrapper.query_binary_values(
+                    ":DISPlay:DATA? PNG",
+                    datatype='B'
+                )
+                
+                if image_data:
+                    # Save the screenshot to the desired location
+                    with open(screenshot_path, 'wb') as f:
+                        f.write(bytes(image_data))
+                    return f"Screenshot saved: {screenshot_path}"
+                else:
+                    return "Screenshot capture failed: No data received"
+                    
+            except Exception as e:
+                return f"Error capturing screenshot: {str(e)}"
 
         except Exception as e:
-
             return f"Error: {str(e)}"
 
     def acquire_data(self, ch1, ch2, ch3, ch4, math1, math2, math3, math4):
@@ -3348,6 +3352,7 @@ class GradioOscilloscopeGUI:
 
                     )
 
+                    # Define measurement choices as a list of tuples without type annotation
                     measurement_choices = [
                         ("Frequency", "FREQ"),
                         ("Period", "PERiod"),
@@ -3358,7 +3363,12 @@ class GradioOscilloscopeGUI:
                         ("Base", "VBASe"),
                         ("Average", "VAVG"),
                         ("RMS", "VRMS"),
-                        ("Maximum", "VMAX")
+                        ("Maximum", "VMAX"),
+                        ("Minimum", "VMIN"),
+                        ("Rise Time", "RISE"),
+                        ("Fall Time", "FALL"),
+                        ("Duty Cycle", "DUTYcycle"),
+                        ("Negative Duty Cycle", "NDUTy")
                     ]
                     
                     measurement_type = gr.Dropdown(
