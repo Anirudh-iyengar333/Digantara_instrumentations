@@ -3378,7 +3378,7 @@ class GradioOscilloscopeGUI:
                     )
                     
                     measure_btn = gr.Button("Measure", variant="primary")
-                    all_measurements_btn = gr.Button("Show All", variant="secondary")
+                    all_measurements_btn = gr.Button("Show All", variant="primary")
                 
                     measurement_result = gr.Textbox(label="Measurement Result", interactive=False)
                     all_measurements_result = gr.Textbox(
@@ -3401,91 +3401,91 @@ class GradioOscilloscopeGUI:
                         outputs=all_measurements_result
                     )
                 
-                # ================================================================
-                # End of Measurements tab
+            # ================================================================
+            # End of Measurements tab
                 
-                # Create a new tab for Operations & File Management
-                with gr.Tab("Operations & File Management"):
-                    with gr.Column(variant="panel"):
-                        gr.Markdown("### File Save Locations")
-                        
-                        with gr.Row():
-                            data_path = gr.Textbox(
-                                label="Data Directory",
-                                value=self.save_locations['data'],
-                                scale=4
-                            )
-                            data_browse_btn = gr.Button("Browse", scale=1)
-                        
-                        with gr.Row():
-                            graphs_path = gr.Textbox(
-                                label="Graphs Directory",
-                                value=self.save_locations['graphs'],
-                                scale=4
-                            )
-                            graphs_browse_btn = gr.Button("Browse", scale=1)
-                        
-                        with gr.Row():
-                            screenshots_path = gr.Textbox(
-                                label="Screenshots Directory",
-                                value=self.save_locations['screenshots'],
-                                scale=4
-                            )
-                            screenshots_browse_btn = gr.Button("Browse", scale=1)
-                        
-                        with gr.Row():
-                            update_paths_btn = gr.Button("Update Paths", variant="primary")
-                            path_status = gr.Textbox(label="Path Status", interactive=False, scale=4)
-                        
-                        # Define path update functions
-                        def update_paths(data, graphs, screenshots):
-                            self.save_locations['data'] = data
-                            self.save_locations['graphs'] = graphs
-                            self.save_locations['screenshots'] = screenshots
-                            return "Paths updated successfully"
-                        
-                        def browse_data_folder(current_path):
-                            new_path = self.browse_folder(current_path, "Data")
-                            self.save_locations['data'] = new_path
-                            return new_path, f"Data directory updated to: {new_path}"
-                        
-                        def browse_graphs_folder(current_path):
-                            new_path = self.browse_folder(current_path, "Graphs")
-                            self.save_locations['graphs'] = new_path
-                            return new_path, f"Graphs directory updated to: {new_path}"
-                        
-                        def browse_screenshots_folder(current_path):
-                            new_path = self.browse_folder(current_path, "Screenshots")
-                            self.save_locations['screenshots'] = new_path
-                            return new_path, f"Screenshots directory updated to: {new_path}"
-                        
-                        # Connect the buttons to their functions
-                        update_paths_btn.click(
-                            fn=update_paths,
-                            inputs=[data_path, graphs_path, screenshots_path],
-                            outputs=[path_status]
-                        )
-                        
-                        data_browse_btn.click(
-                            fn=browse_data_folder,
-                            inputs=[data_path],
-                            outputs=[data_path, path_status]
-                        )
-                        
-                        graphs_browse_btn.click(
-                            fn=browse_graphs_folder,
-                            inputs=[graphs_path],
-                            outputs=[graphs_path, path_status]
-                        )
-                        
-                        screenshots_browse_btn.click(
-                            fn=browse_screenshots_folder,
-                            inputs=[screenshots_path],
-                            outputs=[screenshots_path, path_status]
-                        )
+            # Create a new tab for Operations & File Management
+            with gr.Tab("Operations & File Management"):
+                with gr.Column(variant="panel"):
+                    gr.Markdown("### File Save Locations")
                     
-                    # Data Acquisition and Export section
-                    gr.Markdown("### Data Acquisition and Export")
+                    with gr.Row():
+                        data_path = gr.Textbox(
+                            label="Data Directory",
+                            value=self.save_locations['data'],
+                            scale=4
+                        )
+                        data_browse_btn = gr.Button("Browse", scale=1)
+                    
+                    with gr.Row():
+                        graphs_path = gr.Textbox(
+                            label="Graphs Directory",
+                            value=self.save_locations['graphs'],
+                            scale=4
+                        )
+                        graphs_browse_btn = gr.Button("Browse", scale=1)
+                    
+                    with gr.Row():
+                        screenshots_path = gr.Textbox(
+                            label="Screenshots Directory",
+                            value=self.save_locations['screenshots'],
+                            scale=4
+                        )
+                        screenshots_browse_btn = gr.Button("Browse", scale=1)
+                    
+                    with gr.Row():
+                        update_paths_btn = gr.Button("Update Paths", variant="primary")
+                        path_status = gr.Textbox(label="Path Status", interactive=False, scale=4)
+                    
+                    # Define path update functions
+                    def update_paths(data, graphs, screenshots):
+                        self.save_locations['data'] = data
+                        self.save_locations['graphs'] = graphs
+                        self.save_locations['screenshots'] = screenshots
+                        return "Paths updated successfully"
+                    
+                    def browse_data_folder(current_path):
+                        new_path = self.browse_folder(current_path, "Data")
+                        self.save_locations['data'] = new_path
+                        return new_path, f"Data directory updated to: {new_path}"
+                    
+                    def browse_graphs_folder(current_path):
+                        new_path = self.browse_folder(current_path, "Graphs")
+                        self.save_locations['graphs'] = new_path
+                        return new_path, f"Graphs directory updated to: {new_path}"
+                    
+                    def browse_screenshots_folder(current_path):
+                        new_path = self.browse_folder(current_path, "Screenshots")
+                        self.save_locations['screenshots'] = new_path
+                        return new_path, f"Screenshots directory updated to: {new_path}"
+                    
+                    # Connect the buttons to their functions
+                    update_paths_btn.click(
+                        fn=update_paths,
+                        inputs=[data_path, graphs_path, screenshots_path],
+                        outputs=[path_status]
+                    )
+                    
+                    data_browse_btn.click(
+                        fn=browse_data_folder,
+                        inputs=[data_path],
+                        outputs=[data_path, path_status]
+                    )
+                    
+                    graphs_browse_btn.click(
+                        fn=browse_graphs_folder,
+                        inputs=[graphs_path],
+                        outputs=[graphs_path, path_status]
+                    )
+                    
+                    screenshots_browse_btn.click(
+                        fn=browse_screenshots_folder,
+                        inputs=[screenshots_path],
+                        outputs=[screenshots_path, path_status]
+                    )
+                
+                # Data Acquisition and Export section
+                gr.Markdown("### Data Acquisition and Export")
 
                 with gr.Row():
 
