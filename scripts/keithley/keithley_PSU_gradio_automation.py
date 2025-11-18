@@ -96,21 +96,21 @@ except ImportError as e:
 
 class PowerSupplyAutomationGradio:
     """
-    ╔══════════════════════════════════════════════════════════════════════════╗
-    ║  MAIN APPLICATION CLASS - PowerSupplyAutomationGradio                    ║
-    ║                                                                          ║
-    ║  WHAT THIS CLASS DOES:                                                   ║
-    ║  This is the "brain" of our automation system. It manages:              ║
-    ║  • Connection to the Keithley power supply hardware                      ║
-    ║  • The web interface that users interact with                           ║
-    ║  • All three power supply channels (voltage, current control)           ║
-    ║  • Automated voltage ramping (creating waveforms over time)             ║
-    ║  • Data collection and export to CSV files                              ║
-    ║  • Real-time monitoring and safety features                             ║
-    ║                                                                          ║
-    ║  THINK OF IT AS: A remote control for a complex power supply that       ║
-    ║  works through a web browser                                            ║
-    ╚══════════════════════════════════════════════════════════════════════════╝
+    ╔══════════════════════════════════════════════════════════════════╗
+    ║  MAIN APPLICATION CLASS - PowerSupplyAutomationGradio            ║
+    ║                                                                  ║
+    ║  WHAT THIS CLASS DOES:                                           ║
+    ║  This is the "brain" of our automation system. It manages:      ║
+    ║  • Connection to the Keithley power supply hardware              ║
+    ║  • The web interface that users interact with                   ║
+    ║  • All three power supply channels (voltage, current control)   ║
+    ║  • Automated voltage ramping (creating waveforms over time)     ║
+    ║  • Data collection and export to CSV files                      ║
+    ║  • Real-time monitoring and safety features                     ║
+    ║                                                                  ║
+    ║  THINK OF IT AS: A remote control for a complex power supply   ║
+    ║  that works through a web browser                                ║
+    ╚══════════════════════════════════════════════════════════════════╝
     """
 
     def __init__(self):
@@ -445,7 +445,7 @@ class PowerSupplyAutomationGradio:
             self.voltage_data.append({
                 'timestamp': ts,              # When this happened
                 'set_voltage': set_v,         # What we requested
-                'measured_voltage': meas_v,   # What we actually got
+                'measured_voltage': meas_v,   # What the power supply actually got
                 'cycle_number': cycle_no,     # Which repetition
                 'point_in_cycle': point_idx   # Position in that repetition
             })
@@ -1110,12 +1110,43 @@ class PowerSupplyAutomationGradio:
                                 inputs=[volt_slider, curr_limit, ovp_level]
                             )
 
+                            # --- FINAL FIX: Query output state from instrument after enable/disable ---
+                            def update_channel_status_after_action(action, ch=ch):
+                                # Perform the action (enable/disable)
+                                if action == "enable":
+                                    self.enable_channel_output(ch)
+                                else:
+                                    self.disable_channel_output(ch)
+                                # Wait for instrument to process
+                                time.sleep(0.5)
+                                # Try to query the instrument for output state
+                                status = "OFF"
+                                try:
+                                    if self.power_supply and self.power_supply.is_connected:
+                                        # Try to use a direct query if available
+                                        if hasattr(self.power_supply, "query_output_enabled"):
+                                            is_on = self.power_supply.query_output_enabled(ch)
+                                            status = "ON" if is_on else "OFF"
+                                            self.channel_states[ch]["enabled"] = bool(is_on)
+                                        elif hasattr(self.power_supply, "get_output_state"):
+                                            state = self.power_supply.get_output_state(ch)
+                                            status = "ON" if state in ("ON", True, 1) else "OFF"
+                                            self.channel_states[ch]["enabled"] = (status == "ON")
+                                        else:
+                                            # Fallback: use last known state
+                                            status = "ON" if self.channel_states[ch]["enabled"] else "OFF"
+                                except Exception:
+                                    status = "ON" if self.channel_states[ch]["enabled"] else "OFF"
+                                return status
+
                             enable_btn.click(
-                                fn=lambda ch=ch: self.enable_channel_output(ch)
+                                fn=lambda ch=ch: update_channel_status_after_action("enable", ch),
+                                outputs=[ch_status]
                             )
 
                             disable_btn.click(
-                                fn=lambda ch=ch: self.disable_channel_output(ch)
+                                fn=lambda ch=ch: update_channel_status_after_action("disable", ch),
+                                outputs=[ch_status]
                             )
 
                             meas_btn.click(
@@ -1272,38 +1303,35 @@ def main():
         # ================================================================
         # This initializes all the internal systems (logging, data storage, etc.)
         app = PowerSupplyAutomationGradio()
-
-        # ================================================================
-        # STEP 2: Build the web interface
-        # ================================================================
-        # This creates all the buttons, sliders, and display elements
         demo = app.create_gradio_interface()
 
         # ================================================================
         # STEP 3: Launch the web server and open browser
         # ================================================================
         print("Launching web interface...")
-        print("Opening browser to http://localhost:7860")
 
-        demo.launch(
-            server_name="127.0.0.1",  # Listen on local machine only (not accessible from network)
-            server_port=7860,          # Use port 7860 for web server
-            share=False,               # Don't create public internet link (keep it local)
-            show_error=True,           # Display errors in the web interface if they occur
-            inbrowser=True             # Automatically open web browser to the interface
-        )
+        # Use network binding so other laptops on the same WiFi can access
+        chosen_port = 7863
+        print(f"Opening browser to http://0.0.0.0:{chosen_port}")
+        print("Other laptops on the same WiFi can open: http://[your-computer-ip]:7863")
+
+        try:
+            demo.launch(
+                server_name="0.0.0.0",
+                server_port=chosen_port,
+                share=False,
+                show_error=True,
+                #inbrowser=True
+            )
+        except OSError as e:
+            print(f"Application error during launch: {e}")
+            print("You can set a specific port via the GRADIO_SERVER_PORT environment variable,")
+            print("or ensure the chosen port is free and try again.")
 
     except Exception as e:
-        # ================================================================
-        # ERROR HANDLING
-        # ================================================================
-        # If anything goes wrong during startup, display the error
         print(f"Application error: {e}")
-
-        # Import and use traceback to show detailed error information
         import traceback
-        traceback.print_exc()  # Print full error details to help with debugging
-
+        traceback.print_exc()
 
 # ============================================================================
 # PROGRAM EXECUTION CHECK
