@@ -5881,7 +5881,7 @@ class UnifiedInstrumentControl:
             server_name="0.0.0.0",
             share=share,
             server_port=server_port,
-            inbrowser=auto_open,
+            #inbrowser=auto_open,
             show_error=True
         )
 
