@@ -2,6 +2,8 @@
 ## Digantara Instrumentation Control Suite
 
 > **Your guide to all available documentation**
+>
+> **Developed by: Anirudh Iyengar** | Digantara Research and Technologies Pvt. Ltd.
 
 ---
 

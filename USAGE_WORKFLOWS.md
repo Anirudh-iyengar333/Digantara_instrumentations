@@ -2,6 +2,8 @@
 ## Common Tasks and How to Accomplish Them
 
 > Practical examples of real-world testing scenarios
+>
+> **Developed by: Anirudh Iyengar** | Digantara Research and Technologies Pvt. Ltd.
 
 ---
 

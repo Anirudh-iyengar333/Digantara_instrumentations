@@ -2,6 +2,8 @@
 ## Digantara Instrumentation Control Suite
 
 > Step-by-step installation for Windows, Mac, and Linux
+>
+> **Developed by: Anirudh Iyengar** | Digantara Research and Technologies Pvt. Ltd.
 
 ---
 

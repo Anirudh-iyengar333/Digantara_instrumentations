@@ -2425,7 +2425,7 @@ class GradioOscilloscopeGUI:
         ) as interface:
 
             gr.Markdown("# DIGANTARA Oscilloscope Control")
-
+            gr.Markdown("**Developed by: Anirudh Iyengar** | Digantara Research and Technologies Pvt. Ltd.")
             gr.Markdown("**Professional oscilloscope automation interface with comprehensive control features**")
 
             # ================================================================

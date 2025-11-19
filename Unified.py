@@ -4160,6 +4160,7 @@ class UnifiedInstrumentControl:
                       theme=gr.themes.Soft(primary_hue="indigo"), 
                       css=self._css) as interface:
             gr.Markdown("# DIGANTARA Unified Lab Instrument Control")
+            gr.Markdown("**Developed by: Anirudh Iyengar** | Digantara Research and Technologies Pvt. Ltd.")
             gr.Markdown("Professional control interface for multiple lab instruments")
             
             with gr.Tabs():

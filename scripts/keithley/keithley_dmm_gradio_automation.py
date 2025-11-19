@@ -465,6 +465,7 @@ def create_dmm_interface():
     
     with gr.Blocks(title="Keithley DMM Control Center", theme=gr.themes.Soft()) as interface:
         gr.Markdown("# Keithley DMM Control Center")
+        gr.Markdown("**Developed by: Anirudh Iyengar** | Digantara Research and Technologies Pvt. Ltd.")
         gr.Markdown("Professional digital multimeter control and data acquisition interface")
         
         with gr.Tabs():

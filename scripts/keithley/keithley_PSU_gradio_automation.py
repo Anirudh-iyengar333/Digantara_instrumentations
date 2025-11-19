@@ -1030,6 +1030,7 @@ class PowerSupplyAutomationGradio:
 
             # Page title and description
             gr.Markdown("# DIGANTARA PSU Control")
+            gr.Markdown("**Developed by: Anirudh Iyengar** | Digantara Research and Technologies Pvt. Ltd.")
             gr.Markdown("Professional automation control for Keithley 2230 power supply")
 
             # ================================================================

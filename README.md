@@ -2,6 +2,9 @@
 
 > **Professional Laboratory Instrument Control System**
 > Web-based automation for Power Supplies, Multimeters, and Oscilloscopes
+>
+> **Developed by: Anirudh Iyengar**
+> Digantara Research and Technologies Pvt. Ltd.
 
 ---
 
@@ -592,7 +595,9 @@ server_port=7861  # or 7862, 7863, etc.
 ## License and Credits
 
 **Project**: Digantara Instrumentation Control Suite
-**Developer**: Digantara Research and Technologies Pvt. Ltd
+**Lead Developer**: Anirudh Iyengar
+**Organization**: Digantara Research and Technologies Pvt. Ltd
+**Contact**: anirudh.iyengar@digantara.co.in
 **License**: MIT License
 **Version**: 1.0.0
 

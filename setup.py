@@ -6,9 +6,10 @@ with open("README.md", "r", encoding="utf-8") as fh:
 setup(
     name="digantara-instruments",
     version="0.1.0",
-    author="Digantara Research and Technologies",
-    author_email="info@digantara.com",
+    author="Anirudh Iyengar",
+    author_email="anirudh.iyengar@digantara.co.in",
     description="Instrument control and automation tools for Digantara's testing infrastructure",
+    maintainer="Digantara Research and Technologies",
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/digantara/instruments",

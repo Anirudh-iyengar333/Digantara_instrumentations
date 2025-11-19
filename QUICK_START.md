@@ -1,6 +1,8 @@
 # Quick Start Guide for Non-Technical Users
 
 > Get up and running in **5 minutes** or less!
+>
+> **Developed by: Anirudh Iyengar** | Digantara Research and Technologies Pvt. Ltd.
 
 ---
 
