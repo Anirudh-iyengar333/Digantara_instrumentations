@@ -1859,7 +1859,8 @@ class PowerSupplyAutomationGradio:
 
 
                     # ────────────────────────────────────────────────────────
-                    # Safety Clamp to Hardware Limits
+                    # Safety Clamp to Hardware Limit
+                    
                     # ────────────────────────────────────────────────────────
                     v = max(0.0, min(v, 30.0))      # Ensure 0V ≤ v ≤ 30V
                                                     # Prevents PSU over-voltage commands
