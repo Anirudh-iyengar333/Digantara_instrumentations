@@ -2619,18 +2619,18 @@ class PowerSupplyAutomationGradio:
         │                                                                      │
         │ Control Loop Steps (per waveform point):                             │
         │   1. Set PSU output voltage to target value                          │
-        │   2. Wait for PSU settling (capacitor stabilization)                 │
-        │   3. Measure actual voltage and current (feedback)                   │
-        │   4. Record data with timing metadata                                │
-        │   5. Check for stop condition (user abort)                           │
-        │   6. Repeat for all points in profile                                │
+        │   2. Calculate elapsed time and sleep to meet target time            │
+        │   3. Record data with timing metadata                                │
+        │   4. Check for stop condition (user abort)                           │
+        │   5. Repeat for all points in profile                                │
         │                                                                      │
         │ Timing Components per Point:                                         │
         │   - SCPI set voltage command:    ~30-50ms (VISA overhead)            │
-        │   - PSU settling time:           50-200ms (user configurable)        │
-        │   - SCPI measure commands (2×):  ~40-80ms (V+I measurement)          │
-        │   - Data processing/logging:     ~1-5ms (Python overhead)            │
-        │   TOTAL per point:               ~150-350ms typical                  │
+        │   - Calculated delay:            Adjusted to meet exact target       │
+        │   TOTAL per point:               User-defined (default 262ms)        │
+        │                                                                      │
+        │ Note: Measurements are skipped to ensure precise timing control.     │
+        │       Use external DMM for accurate voltage/current measurements.    │
         │                                                                      │
         │ Safety Features:                                                     │
         │   - Automatic output disable on completion                           │
@@ -2644,9 +2644,9 @@ class PowerSupplyAutomationGradio:
             Uses ramping_active flag for clean shutdown from UI thread.
 
         Performance:
-            Typical execution time: N_points × (settle + VISA_overhead)
-            Example: 150 points × 250ms = 37.5 seconds
-            Not suitable for high-speed (<10ms) voltage transitions due to VISA latency.
+            Typical execution time: N_points × (target_time_per_point)
+            Example: 150 points × 262ms = 39.3 seconds
+            User can adjust time per point from 50ms to 5000ms (default: 262ms).
 
         Data Collection:
             Each point stores: timestamp, set_voltage, measured_voltage,
@@ -2709,7 +2709,7 @@ class PowerSupplyAutomationGradio:
         self.log_message(f"Total Points: {len(self.ramping_profile)}", "INFO")
         self.log_message(f"Cycles: {self.ramping_params['cycles']}", "INFO")
         self.log_message(f"Points per Cycle: {self.ramping_params['points_per_cycle']}", "INFO")
-        self.log_message(f"Settle Time: {psu_settle}s", "INFO")
+        self.log_message(f"Target Time per Point: {psu_settle}s ({psu_settle*1000:.0f}ms)", "INFO")
         self.log_message(f"{'='*60}", "INFO")
 
         # ────────────────────────────────────────────────────────────────────
@@ -2769,37 +2769,32 @@ class PowerSupplyAutomationGradio:
                 self.power_supply.set_voltage(channel, voltage)
 
                 # ────────────────────────────────────────────────────────────
-                # STEP 2: Wait for PSU Output Settling
+                # STEP 2: Calculate Elapsed Time and Sleep to Meet Target
                 # ────────────────────────────────────────────────────────────
-                # Critical for accurate measurements
-                # PSU output capacitors need time to charge to target voltage
-                # Load transient response depends on DUT characteristics
-                time.sleep(psu_settle)              # Typical: 50-200ms
+                # Calculate how much time has elapsed since point start
+                point_elapsed = (datetime.now() - point_start_time).total_seconds()
+
+                # Calculate remaining time to meet target time per point
+                additional_delay = psu_settle - point_elapsed
+
+                # Sleep for remaining time (includes settle + measurement time)
+                if additional_delay > 0:
+                    time.sleep(additional_delay)    # Sleep to meet exact target time
+
+                # Use setpoint values (no actual measurement to avoid delays)
+                measured_v = voltage                # Use commanded voltage
+                measured_i = 0.0                    # No current measurement
 
                 # ────────────────────────────────────────────────────────────
-                # STEP 3: Measure Actual Output (Feedback)
-                # ────────────────────────────────────────────────────────────
-                # Two SCPI queries: MEAS:VOLT? CHAN<n>, MEAS:CURR? CHAN<n>
-                # VISA overhead: ~40-80ms total (2 query transactions)
-                try:
-                    measured_v = self.power_supply.measure_voltage(channel)  # Read actual voltage
-                    measured_i = self.power_supply.measure_current(channel)  # Read actual current
-                except Exception as meas_err:
-                    # Measurement timeout or SCPI error
-                    self.logger.warning(f"Measurement error at point {idx}: {meas_err}")
-                    measured_v = voltage            # Fallback: use commanded voltage
-                    measured_i = 0.0                # Assume no current on error
-
-                # ────────────────────────────────────────────────────────────
-                # STEP 4: Timing Analysis
+                # STEP 3: Timing Analysis
                 # ────────────────────────────────────────────────────────────
                 point_end_time = datetime.now()     # Record point completion time
                 point_duration = (point_end_time - point_start_time).total_seconds()
-                                                    # Duration includes: set + settle + measure + overhead
+                                                    # Duration should match target time per point
                 point_timings.append(point_duration)  # Store for statistics
 
                 # ────────────────────────────────────────────────────────────
-                # STEP 5: Store Data Point with Metadata
+                # STEP 4: Store Data Point with Metadata
                 # ────────────────────────────────────────────────────────────
                 data_point = {
                     'timestamp': point_end_time,            # ISO timestamp of measurement
@@ -3154,6 +3149,7 @@ class PowerSupplyAutomationGradio:
 
                 # Set voltage on all channels for this time point AND record data
                 timestamp = datetime.now()
+                channels_start = datetime.now()
 
                 for gen_data in generators:
                     profile = gen_data['profile']
@@ -3194,11 +3190,22 @@ class PowerSupplyAutomationGradio:
                     }
                     self.ramping_data.append(data_point)
 
-                    # Delay between channel operations
-                    time.sleep(0.15)
+                # Calculate elapsed time and add delay to meet target time per point
+                channels_elapsed = (datetime.now() - channels_start).total_seconds()
+                point_elapsed = (datetime.now() - point_start_time).total_seconds()
+                additional_delay = psu_settle - point_elapsed
 
-                # Wait for PSU settling after all channels are set
-                time.sleep(psu_settle)
+                # Debug: Log timing breakdown for first few points
+                if point_idx < 3:
+                    self.log_message(
+                        f"Point {point_idx} timing: channels={channels_elapsed*1000:.0f}ms, "
+                        f"total_so_far={point_elapsed*1000:.0f}ms, target={psu_settle*1000:.0f}ms, "
+                        f"will_sleep={max(0, additional_delay)*1000:.0f}ms",
+                        "INFO"
+                    )
+
+                if additional_delay > 0:
+                    time.sleep(additional_delay)  # Sleep remaining time to meet target
 
                 # Track timing
                 point_end_time = datetime.now()
@@ -5746,12 +5753,12 @@ class UnifiedInstrumentControl:
             # Global settings
             with gr.Row():
                 psu_settle_time = gr.Slider(
-                    label="Settle Time per Point (s)",
-                    minimum=0.01,
-                    maximum=1.0,
-                    value=0.05,
+                    label="Time per Point (s)",
+                    minimum=0.05,
+                    maximum=5.0,
+                    value=0.262,
                     step=0.01,
-                    info="Applied to all channels - lower = faster but less accurate"
+                    info="Total time per point including settle + measurement (e.g., 0.262s = 262ms)"
                 )
                 psu_estimated_duration = gr.Textbox(
                     label="Estimated Duration",
@@ -5775,24 +5782,10 @@ class UnifiedInstrumentControl:
                 The duration is based on the LONGEST profile among enabled channels,
                 since all channels execute synchronously at each time point.
 
-                Per-point overhead includes:
-                - N × set_voltage commands (~0.65s each per channel)
-                - N × measure_voltage commands (~0.65s each per channel)
-                - settle time
-
-                For multi-channel, overhead scales with number of channels.
+                With the new timing control, each point takes exactly the user-defined
+                "Time per Point" value regardless of number of channels.
                 """
                 try:
-                    # Timing parameters (empirically measured from actual execution)
-                    # Per channel per point:
-                    #   - APPLY command: ~0.1s
-                    #   - Command delay: ~0.05s
-                    #   - Inter-channel delay: ~0.15s
-                    #   - Overhead: ~0.085s
-                    #   Total per channel: ~0.385s
-                    # Measured: 820ms for 2 channels = (2 × 0.385) + 0.05 settle = 0.82s ✓
-                    TIME_PER_CHANNEL_PER_POINT = 0.385  # seconds
-
                     # Count enabled channels and find max points
                     enabled_channels = 0
                     max_points = 0
@@ -5818,15 +5811,12 @@ class UnifiedInstrumentControl:
                     if enabled_channels == 0 or max_points == 0:
                         return "Enable at least one channel"
 
-                    # Calculate per-point overhead
-                    # Per point: N channels × (APPLY cmd + delay) + PSU settle time
-                    # APPLY: 0.1s, inter-channel delay: 0.15s, total per channel: 0.25s
-                    settle_val = float(settle) if settle else 0.05
-                    overhead_per_point = (enabled_channels * TIME_PER_CHANNEL_PER_POINT) + settle_val
+                    # Use the user-defined time per point directly
+                    time_per_point = float(settle) if settle else 0.262
 
-                    # Total estimated time
-                    estimated_time = max_points * overhead_per_point
-                    time_per_point_ms = overhead_per_point * 1000
+                    # Total estimated time = points × time_per_point
+                    estimated_time = max_points * time_per_point
+                    time_per_point_ms = time_per_point * 1000
 
                     # Format output with start/end times
                     from datetime import datetime, timedelta
