@@ -837,11 +837,11 @@ class EnhancedResponsiveAutomationGUI:
 
     def create_measurement_frame(self, parent, row):
         """Create measurement controls for waveform analysis."""
-        meas_frame = ttk.LabelFrame(parent, text="Measurements & Autoscale", padding="3")
+        meas_frame = ttk.LabelFrame(parent, text="Measurements & Acquisition Control", padding="3")
         meas_frame.grid(row=row, column=0, sticky='ew', pady=(0, 2))
-        for i in range(10):
+        for i in range(14):  # Increased columns for RUN/STOP/SINGLE buttons
             meas_frame.columnconfigure(i, weight=0)
-        meas_frame.columnconfigure(9, weight=1)
+        meas_frame.columnconfigure(13, weight=1)
         col = 0
         ttk.Label(meas_frame, text="MEASUREMENT:", font=('Arial', 8, 'bold'), foreground='#1a365d').grid(row=0, column=col, sticky='w', padx=(0, 5))
         col += 1
@@ -866,7 +866,22 @@ class EnhancedResponsiveAutomationGUI:
         col += 1
         ttk.Separator(meas_frame, orient='vertical').grid(row=0, column=col, sticky='ns', padx=5)
         col += 1
-        self.autoscale_btn = ttk.Button(meas_frame, text="⚡ Autoscale", width=12, command=self.perform_autoscale, style='Success.TButton', state='disabled')
+
+        # Acquisition Control Buttons
+        ttk.Label(meas_frame, text="CONTROL:", font=('Arial', 8, 'bold'), foreground='#1a365d').grid(row=0, column=col, sticky='w', padx=(0, 5))
+        col += 1
+        self.run_btn = ttk.Button(meas_frame, text="▶ RUN", width=8, command=self.run_acquisition, style='Success.TButton', state='disabled')
+        self.run_btn.grid(row=0, column=col, sticky='ew', padx=2)
+        col += 1
+        self.stop_btn = ttk.Button(meas_frame, text="⏹ STOP", width=8, command=self.stop_acquisition, style='Danger.TButton', state='disabled')
+        self.stop_btn.grid(row=0, column=col, sticky='ew', padx=2)
+        col += 1
+        self.single_btn = ttk.Button(meas_frame, text="⏯ SINGLE", width=9, command=self.single_acquisition, style='Warning.TButton', state='disabled')
+        self.single_btn.grid(row=0, column=col, sticky='ew', padx=2)
+        col += 1
+        ttk.Separator(meas_frame, orient='vertical').grid(row=0, column=col, sticky='ns', padx=5)
+        col += 1
+        self.autoscale_btn = ttk.Button(meas_frame, text="⚡ Autoscale", width=11, command=self.perform_autoscale, style='Info.TButton', state='disabled')
         self.autoscale_btn.grid(row=0, column=col, sticky='ew', padx=2)
 
     def create_operations_frame(self, parent, row):
@@ -1343,7 +1358,8 @@ class EnhancedResponsiveAutomationGUI:
                   self.generate_plot_btn, self.full_automation_btn, self.open_folder_btn,
                   self.config_channel_btn, self.test_btn, self.wgen1_apply_btn, self.wgen2_apply_btn,
                   self.timebase_apply_btn, self.trigger_apply_btn,
-                  self.measure_btn, self.autoscale_btn, self.live_feed_start_btn]  # NEW: Measurement & live feed buttons
+                  self.measure_btn, self.autoscale_btn, self.live_feed_start_btn,
+                  self.run_btn, self.stop_btn, self.single_btn]  # NEW: Acquisition control buttons
         for btn in buttons:  # Iterate all operation buttons
             try:
                 btn.configure(state='normal')  # Enable button (clickable)
@@ -1857,6 +1873,18 @@ class EnhancedResponsiveAutomationGUI:
                     self.log_message(data, "SUCCESS")
                     self.update_status("Autoscale complete")
 
+                elif status_type == "run_complete":
+                    self.log_message(data, "SUCCESS")
+                    self.update_status("Acquisition running")
+
+                elif status_type == "stop_complete":
+                    self.log_message(data, "SUCCESS")
+                    self.update_status("Acquisition stopped")
+
+                elif status_type == "single_complete":
+                    self.log_message(data, "SUCCESS")
+                    self.update_status("Single trigger armed")
+
         except queue.Empty:  # No more messages in queue
             pass
         except Exception as e:
@@ -1923,12 +1951,87 @@ class EnhancedResponsiveAutomationGUI:
                 self.root.after(0, lambda: self.autoscale_btn.config(state='normal'))
         threading.Thread(target=autoscale_task, daemon=True).start()
 
+    def run_acquisition(self):
+        """Start continuous acquisition (RUN mode)."""
+        def run_task():
+            try:
+                self.log_message("Starting acquisition (RUN mode)...", "INFO")
+                self.update_status("Starting RUN...")
+                self.root.after(0, lambda: self.run_btn.config(state='disabled'))
+                osc = self.oscilloscope
+                if not (osc and osc.is_connected):
+                    self.status_queue.put(('error', 'Not connected'))
+                    self.root.after(0, lambda: self.run_btn.config(state='normal'))
+                    return
+                with self.io_lock:
+                    success = osc.run()
+                self.root.after(0, lambda: self.run_btn.config(state='normal'))
+                if success:
+                    self.status_queue.put(('run_complete', 'Acquisition started (RUN mode) ✓'))
+                else:
+                    self.status_queue.put(('error', 'Failed to start acquisition'))
+            except Exception as e:
+                self.log_message(f"RUN error: {e}", "ERROR")
+                self.status_queue.put(('error', f"RUN error: {e}"))
+                self.root.after(0, lambda: self.run_btn.config(state='normal'))
+        threading.Thread(target=run_task, daemon=True).start()
+
+    def stop_acquisition(self):
+        """Stop acquisition (STOP mode - freezes display)."""
+        def stop_task():
+            try:
+                self.log_message("Stopping acquisition (STOP mode)...", "INFO")
+                self.update_status("Stopping acquisition...")
+                self.root.after(0, lambda: self.stop_btn.config(state='disabled'))
+                osc = self.oscilloscope
+                if not (osc and osc.is_connected):
+                    self.status_queue.put(('error', 'Not connected'))
+                    self.root.after(0, lambda: self.stop_btn.config(state='normal'))
+                    return
+                with self.io_lock:
+                    success = osc.stop()
+                self.root.after(0, lambda: self.stop_btn.config(state='normal'))
+                if success:
+                    self.status_queue.put(('stop_complete', 'Acquisition stopped - Display frozen ⏹'))
+                else:
+                    self.status_queue.put(('error', 'Failed to stop acquisition'))
+            except Exception as e:
+                self.log_message(f"STOP error: {e}", "ERROR")
+                self.status_queue.put(('error', f"STOP error: {e}"))
+                self.root.after(0, lambda: self.stop_btn.config(state='normal'))
+        threading.Thread(target=stop_task, daemon=True).start()
+
+    def single_acquisition(self):
+        """Trigger single acquisition (SINGLE mode)."""
+        def single_task():
+            try:
+                self.log_message("Triggering single acquisition...", "INFO")
+                self.update_status("Waiting for trigger (SINGLE)...")
+                self.root.after(0, lambda: self.single_btn.config(state='disabled'))
+                osc = self.oscilloscope
+                if not (osc and osc.is_connected):
+                    self.status_queue.put(('error', 'Not connected'))
+                    self.root.after(0, lambda: self.single_btn.config(state='normal'))
+                    return
+                with self.io_lock:
+                    success = osc.single()
+                self.root.after(0, lambda: self.single_btn.config(state='normal'))
+                if success:
+                    self.status_queue.put(('single_complete', 'Single trigger armed - Waiting for trigger ⏯'))
+                else:
+                    self.status_queue.put(('error', 'Failed to arm single trigger'))
+            except Exception as e:
+                self.log_message(f"SINGLE error: {e}", "ERROR")
+                self.status_queue.put(('error', f"SINGLE error: {e}"))
+                self.root.after(0, lambda: self.single_btn.config(state='normal'))
+        threading.Thread(target=single_task, daemon=True).start()
+
     def run(self):
         """Start the application main event loop."""
         try:
             self.log_message("Keysight Oscilloscope Automation", "SUCCESS")
-            self.log_message("New Features: Timebase controls + Individual trigger levels", "SUCCESS")
-            self.log_message("All controls use methods from instrument_control module", "SUCCESS")
+            self.log_message("New Features: RUN/STOP/SINGLE controls + Long timebase fix", "SUCCESS")
+            self.log_message("Acquisition controls: ▶ RUN, ⏹ STOP, ⏯ SINGLE", "SUCCESS")
             self.log_message("Ready to connect to oscilloscope")
             self.root.mainloop()  # Start GUI event loop (blocks until window closed)
         except KeyboardInterrupt:  # User pressed Ctrl+C

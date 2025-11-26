@@ -4762,6 +4762,54 @@ class GradioOscilloscopeGUI:
         except Exception as e:
             return f"Error: {str(e)}"
 
+    def run_acquisition(self):
+        """Start continuous acquisition (RUN mode)"""
+        if not self.oscilloscope or not self.oscilloscope.is_connected:
+            return "Error: Not connected"
+
+        try:
+            with self.io_lock:
+                success = self.oscilloscope.run()
+
+            if success:
+                return "✓ Acquisition started (RUN mode)\nScope is continuously acquiring waveforms"
+            else:
+                return "Failed to start acquisition"
+        except Exception as e:
+            return f"Error: {str(e)}"
+
+    def stop_acquisition(self):
+        """Stop acquisition (STOP mode - freezes display)"""
+        if not self.oscilloscope or not self.oscilloscope.is_connected:
+            return "Error: Not connected"
+
+        try:
+            with self.io_lock:
+                success = self.oscilloscope.stop()
+
+            if success:
+                return "⏹ Acquisition stopped\nDisplay frozen - Perfect for screenshots/data capture"
+            else:
+                return "Failed to stop acquisition"
+        except Exception as e:
+            return f"Error: {str(e)}"
+
+    def single_acquisition(self):
+        """Trigger single acquisition (SINGLE mode)"""
+        if not self.oscilloscope or not self.oscilloscope.is_connected:
+            return "Error: Not connected"
+
+        try:
+            with self.io_lock:
+                success = self.oscilloscope.single()
+
+            if success:
+                return "⏯ Single trigger armed\nWaiting for trigger event to capture one waveform"
+            else:
+                return "Failed to arm single trigger"
+        except Exception as e:
+            return f"Error: {str(e)}"
+
     def run_full_automation(self, ch1, ch2, ch3, ch4, math1, math2, math3, math4, plot_title):
         """Execute complete acquisition, export, and analysis workflow"""
         if not self.oscilloscope or not self.oscilloscope.is_connected:
@@ -4792,35 +4840,21 @@ class GradioOscilloscopeGUI:
 
         try:
             results = []
-            results.append("Step 1/4: Screenshot...")
-            
-            # Capture screenshot using the configured save location
-            try:
-                screenshot_dir = Path(self.save_locations['screenshots'])
-                screenshot_dir.mkdir(parents=True, exist_ok=True)
-                timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-                filename = f"scope_screenshot_{timestamp}.png"
-                screenshot_path = screenshot_dir / filename
-                
-                if hasattr(self.oscilloscope, '_scpi_wrapper'):
-                    image_data = self.oscilloscope._scpi_wrapper.query_binary_values(
-                        ":DISPlay:DATA? PNG",
-                        datatype='B'
-                    )
-                    
-                    if image_data:
-                        with open(screenshot_path, 'wb') as f:
-                            f.write(bytes(image_data))
-                        results.append(f"✓ Screenshot saved: {screenshot_path}")
-                    else:
-                        results.append("⚠ Screenshot capture failed: No data")
-                else:
-                    results.append("⚠ SCPI interface not available, skipping screenshot")
-            except Exception as e:
-                self.logger.warning(f"Screenshot capture error in automation: {e}")
-                results.append(f"⚠ Screenshot failed: {str(e)}")
+            results.append("Preparing automation...")
 
-            results.append("Step 2/4: Acquiring data...")
+            # CRITICAL: Stop oscilloscope to freeze the waveform
+            # This prevents signal from disappearing during data capture
+            results.append("Stopping oscilloscope to freeze waveform...")
+            try:
+                self.oscilloscope.stop()
+                import time
+                time.sleep(0.3)  # Allow scope to settle after stop
+                results.append("✓ Oscilloscope stopped - waveform frozen")
+            except Exception as e:
+                self.logger.warning(f"Could not stop oscilloscope: {e}")
+                results.append(f"⚠ Warning: Could not stop oscilloscope: {str(e)}")
+
+            results.append("\nStep 1/4: Acquiring data...")
             all_channel_data = {}
             for source_type, number in selected_channels:
                 if source_type == 'CH':
@@ -4835,13 +4869,19 @@ class GradioOscilloscopeGUI:
                         results.append(f" MATH{number}: {data['points_count']} points")
 
             if not all_channel_data:
+                # Resume oscilloscope even if data acquisition failed
+                try:
+                    self.oscilloscope.run()
+                    results.append("⚠ Oscilloscope resumed after error")
+                except:
+                    pass
                 return "Error: Data acquisition failed"
 
-            results.append("Step 3/4: Exporting CSV...")
+            results.append("\nStep 2/4: Exporting CSV...")
             csv_files = []
             for source_key, data in all_channel_data.items():
                 csv_file = self.data_acquisition.export_to_csv(
-                    data, 
+                    data,
                     custom_path=self.save_locations['data']
                 )
                 if csv_file:
@@ -4850,7 +4890,7 @@ class GradioOscilloscopeGUI:
             if csv_files:
                 results.append(f" ✓ {len(csv_files)} files exported to: {self.save_locations['data']}")
 
-            results.append("Step 4/4: Generating plots...")
+            results.append("\nStep 3/4: Generating plots...")
             custom_title = plot_title.strip() or None
             plot_files = []
             for source_key, data in all_channel_data.items():
@@ -4861,8 +4901,8 @@ class GradioOscilloscopeGUI:
                     channel_title = None
 
                 plot_file = self.data_acquisition.generate_waveform_plot(
-                    data, 
-                    custom_path=self.save_locations['graphs'], 
+                    data,
+                    custom_path=self.save_locations['graphs'],
                     plot_title=channel_title
                 )
                 if plot_file:
@@ -4871,15 +4911,64 @@ class GradioOscilloscopeGUI:
             if plot_files:
                 results.append(f" ✓ {len(plot_files)} plots generated to: {self.save_locations['graphs']}")
 
+            results.append("\nStep 4/4: Capturing screenshot...")
+
+            # Capture screenshot while oscilloscope is still stopped
+            try:
+                screenshot_dir = Path(self.save_locations['screenshots'])
+                screenshot_dir.mkdir(parents=True, exist_ok=True)
+                timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+                filename = f"scope_screenshot_{timestamp}.png"
+                screenshot_path = screenshot_dir / filename
+
+                if hasattr(self.oscilloscope, '_scpi_wrapper'):
+                    import time
+                    time.sleep(0.1)  # Brief pause before screenshot
+                    image_data = self.oscilloscope._scpi_wrapper.query_binary_values(
+                        ":DISPlay:DATA? PNG",
+                        datatype='B'
+                    )
+
+                    if image_data:
+                        with open(screenshot_path, 'wb') as f:
+                            f.write(bytes(image_data))
+                        results.append(f"✓ Screenshot saved: {screenshot_path}")
+                    else:
+                        results.append("⚠ Screenshot capture failed: No data")
+                else:
+                    results.append("⚠ SCPI interface not available, skipping screenshot")
+            except Exception as e:
+                self.logger.warning(f"Screenshot capture error in automation: {e}")
+                results.append(f"⚠ Screenshot failed: {str(e)}")
+
+            # CRITICAL: Resume oscilloscope run mode
+            results.append("\nResuming oscilloscope to RUN mode...")
+            try:
+                self.oscilloscope.run()
+                import time
+                time.sleep(0.1)
+                results.append("✓ Oscilloscope resumed - acquisition running")
+            except Exception as e:
+                self.logger.error(f"Failed to resume oscilloscope: {e}")
+                results.append(f"⚠ Warning: Could not resume oscilloscope: {str(e)}")
+
             self.last_acquired_data = all_channel_data
-            results.append("\n✓ Full automation completed successfully!")
+            results.append("\n" + "="*60)
+            results.append("✓ FULL AUTOMATION COMPLETED SUCCESSFULLY!")
+            results.append("="*60)
             results.append(f"\nAll files saved to:")
             results.append(f"  • Screenshots: {self.save_locations['screenshots']}")
             results.append(f"  • Data: {self.save_locations['data']}")
             results.append(f"  • Graphs: {self.save_locations['graphs']}")
-            
+
             return "\n".join(results)
         except Exception as e:
+            # Ensure oscilloscope is resumed even if there's an error
+            try:
+                self.oscilloscope.run()
+                self.logger.info("Oscilloscope resumed after exception")
+            except:
+                pass
             self.logger.error(f"Automation error: {e}")
             return f"Automation error: {str(e)}"
 
@@ -6260,9 +6349,15 @@ class UnifiedInstrumentControl:
             osc_config_channel_btn = gr.Button("Configure Channels", variant="primary")
             osc_channel_status = gr.Textbox(label="Status", interactive=False)
             
+            gr.Markdown("### Acquisition Control")
             with gr.Row():
-                osc_autoscale_btn = gr.Button("Autoscale", variant="primary")
-                osc_system_status = gr.Textbox(label="Status", interactive=False, lines=4)
+                osc_run_btn = gr.Button("▶ RUN", variant="primary")
+                osc_stop_btn = gr.Button("⏹ STOP", variant="stop")
+                osc_single_btn = gr.Button("⏯ SINGLE", variant="secondary")
+                osc_autoscale_btn = gr.Button("⚡ Autoscale", variant="primary")
+
+            osc_acquisition_status = gr.Textbox(label="Acquisition Status", interactive=False)
+            osc_system_status = gr.Textbox(label="System Status", interactive=False, lines=3)
 
         with gr.Tab("Timebase & Trigger"):
             gr.Markdown("### Horizontal Timebase Configuration")
@@ -6712,7 +6807,25 @@ class UnifiedInstrumentControl:
             inputs=[],
             outputs=[osc_system_status]
         )
-        
+
+        osc_run_btn.click(
+            fn=self.oscilloscope_controller.run_acquisition,
+            inputs=[],
+            outputs=[osc_acquisition_status]
+        )
+
+        osc_stop_btn.click(
+            fn=self.oscilloscope_controller.stop_acquisition,
+            inputs=[],
+            outputs=[osc_acquisition_status]
+        )
+
+        osc_single_btn.click(
+            fn=self.oscilloscope_controller.single_acquisition,
+            inputs=[],
+            outputs=[osc_acquisition_status]
+        )
+
         osc_timebase_btn.click(
             fn=self.oscilloscope_controller.configure_timebase,
             inputs=[osc_time_scale],

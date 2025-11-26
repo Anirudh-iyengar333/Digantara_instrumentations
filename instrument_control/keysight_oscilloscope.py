@@ -24,8 +24,16 @@ class KeysightDSOX6004AError(Exception):
 class KeysightDSOX6004A:
     """Keysight DSOX6004A Oscilloscope Control Class with Measurement Features"""
 
-    def __init__(self, visa_address: str, timeout_ms: int = 10000) -> None:
-        """Initialize oscilloscope connection parameters"""
+    def __init__(self, visa_address: str, timeout_ms: int = 60000) -> None:
+        """
+        Initialize oscilloscope connection parameters
+
+        Args:
+            visa_address: VISA resource address (e.g., "USB0::0x0957::0x179B::MY12345678::INSTR")
+            timeout_ms: Initial VISA timeout in milliseconds (default: 60000 = 60 seconds)
+                       Note: Timeout will be automatically increased for long timebase settings
+                       (20s, 50s per division) to prevent acquisition errors.
+        """
         self._scpi_wrapper = SCPIWrapper(visa_address, timeout_ms)
         self._logger = logging.getLogger(f'{self.__class__.__name__}.{id(self)}')
         self.max_channels = 4
@@ -147,8 +155,11 @@ class KeysightDSOX6004A:
     def configure_timebase(self, time_scale: float, time_offset: float = 0.0) -> bool:
         """
         Configure horizontal timebase settings
-        
+
         ✓ VERIFIED: TIMebase commands from manual pages 905-920
+
+        Automatically adjusts VISA timeout based on timebase to prevent timeout errors
+        during long acquisitions (e.g., 20s or 50s per division)
         """
         if not self.is_connected:
             self._logger.error("Cannot configure timebase: oscilloscope not connected")
@@ -160,14 +171,28 @@ class KeysightDSOX6004A:
             time_scale = closest_scale
 
         try:
+            # Calculate required timeout based on timebase
+            # Acquisition time ≈ 10 divisions × time_scale + buffer
+            # Add 50% safety margin and convert to milliseconds
+            estimated_acq_time_s = 10 * time_scale
+            required_timeout_ms = int((estimated_acq_time_s * 1.5 + 10) * 1000)
+
+            # Set minimum timeout of 10 seconds for short timebase
+            required_timeout_ms = max(required_timeout_ms, 10000)
+
+            # Update timeout if needed for long acquisitions
+            if required_timeout_ms > self._scpi_wrapper.timeout:
+                self._scpi_wrapper.set_timeout(required_timeout_ms)
+                self._logger.info(f"Timeout adjusted to {required_timeout_ms/1000:.1f}s for timebase {time_scale}s/div")
+
             # SCPI: :TIMebase:SCALe (pg 919)
             self._scpi_wrapper.write(f":TIMebase:SCALe {time_scale}")
             time.sleep(0.1)
-            
+
             # SCPI: :TIMebase:OFFSet (pg 909)
             self._scpi_wrapper.write(f":TIMebase:OFFSet {time_offset}")
             time.sleep(0.1)
-            
+
             self._logger.info(f"Timebase configured: Scale={time_scale}s/div, Offset={time_offset}s")
             return True
         except Exception as e:
@@ -545,14 +570,17 @@ class KeysightDSOX6004A:
     def digitize(self, channel: Optional[int] = None) -> bool:
         """
         Acquire waveform and wait for completion
-        
+
         ✓ VERIFIED: DIGitize command from manual page 262
-        
+
         Args:
             channel: Optional channel number 1-4, None for all channels
-        
+
         Returns:
             bool: True if successful
+
+        Note: This function waits for acquisition to complete. For long timebase
+        settings (20s, 50s), this may take several minutes.
         """
         if not self.is_connected:
             self._logger.error("Cannot digitize: oscilloscope not connected")
@@ -569,7 +597,23 @@ class KeysightDSOX6004A:
                 # SCPI: :DIGitize (pg 262)
                 self._scpi_wrapper.write(":DIGitize")
 
-            time.sleep(0.5)
+            # Get current timebase to estimate wait time
+            try:
+                timebase_scale = float(self._scpi_wrapper.query(":TIMebase:SCALe?").strip())
+                estimated_time = 10 * timebase_scale  # 10 divisions
+                self._logger.info(f"Digitizing... estimated time: {estimated_time:.1f}s")
+
+                # Use smaller sleep intervals for short acquisitions
+                if estimated_time < 2.0:
+                    time.sleep(0.5)
+                else:
+                    # For long acquisitions, wait 80% of estimated time before polling
+                    time.sleep(estimated_time * 0.8)
+            except Exception:
+                # If we can't get timebase, use default wait
+                time.sleep(0.5)
+
+            # Wait for operation to complete (will timeout if acquisition takes too long)
             self._scpi_wrapper.query("*OPC?")
             self._logger.info(f"Digitize completed for channel {channel if channel else 'all'}")
             return True
@@ -1032,18 +1076,24 @@ class KeysightDSOX6004A:
     # WAVEFORM DATA TRANSFER - WAVeform SUBSYSTEM
     # ============================================================================
 
-    def get_waveform_data(self, channel: int, format_type: str = "BYTE") -> Optional[np.ndarray]:
+    def get_waveform_data(self, channel: int, format_type: str = "BYTE",
+                          freeze_acquisition: bool = True) -> Optional[np.ndarray]:
         """
         Retrieve waveform data from oscilloscope
-        
+
         ✓ VERIFIED: :WAVeform commands from manual pages 1137-1203
-        
+
         Args:
             channel: Channel number (1-4)
             format_type: "BYTE", "WORD", or "ASCii"
-        
+            freeze_acquisition: If True, stops acquisition before reading data and resumes after
+                              This prevents signal from disappearing during long acquisitions
+
         Returns:
             numpy array of waveform data or None if error
+
+        Note: For long timebase settings (20s, 50s), freeze_acquisition=True is recommended
+        to ensure stable data capture without signal disappearance.
         """
         if not self.is_connected:
             self._logger.error("Cannot get waveform: oscilloscope not connected")
@@ -1058,30 +1108,61 @@ class KeysightDSOX6004A:
             self._logger.error(f"Invalid format: {format_type}. Must be one of {valid_formats}")
             return None
 
+        acquisition_was_running = False
+
         try:
+            # FREEZE ACQUISITION: Stop the scope to preserve the current waveform
+            if freeze_acquisition:
+                try:
+                    self._logger.info("Stopping acquisition to freeze waveform for data transfer")
+                    self.stop()
+                    acquisition_was_running = True
+                    time.sleep(0.2)  # Allow scope to settle
+                except Exception as e:
+                    self._logger.warning(f"Could not stop acquisition: {e}")
+
             # SCPI: :WAVeform:SOURce (pg 1201)
             self._scpi_wrapper.write(f":WAVeform:SOURce CHANnel{channel}")
             time.sleep(0.1)
-            
+
             # SCPI: :WAVeform:FORMat (pg 1156)
             self._scpi_wrapper.write(f":WAVeform:FORMat {format_type}")
             time.sleep(0.1)
-            
+
             # SCPI: :WAVeform:PREamble? (pg 1158)
             preamble = self._scpi_wrapper.query(":WAVeform:PREamble?").strip()
             self._logger.debug(f"Waveform preamble: {preamble}")
-            
+
             # SCPI: :WAVeform:DATA? (pg 1150)
             data = self._scpi_wrapper.query_binary_values(":WAVeform:DATA?", datatype='B')
-            
+
             if data:
                 waveform = np.array(data, dtype=np.uint8)
                 self._logger.info(f"Retrieved {len(waveform)} waveform points from CH{channel}")
+
+                # RESUME ACQUISITION: Restart the scope if it was running
+                if freeze_acquisition and acquisition_was_running:
+                    try:
+                        self._logger.info("Resuming acquisition (RUN mode)")
+                        self.run()
+                        time.sleep(0.1)
+                    except Exception as e:
+                        self._logger.warning(f"Could not restart acquisition: {e}")
+
                 return waveform
-            
+
             return None
         except Exception as e:
             self._logger.error(f"Failed to get waveform data: {type(e).__name__}: {e}")
+
+            # RESUME ACQUISITION: Make sure to restart even if data transfer failed
+            if freeze_acquisition and acquisition_was_running:
+                try:
+                    self._logger.info("Resuming acquisition after error")
+                    self.run()
+                except Exception as resume_error:
+                    self._logger.error(f"Failed to resume acquisition: {resume_error}")
+
             return None
 
     def set_waveform_points_mode(self, mode: str) -> bool:
@@ -1634,18 +1715,45 @@ class KeysightDSOX6004A:
     # ============================================================================
 
     def capture_screenshot(self, filename: Optional[str] = None, image_format: str = "PNG",
-                          include_timestamp: bool = True) -> Optional[str]:
+                          include_timestamp: bool = True, freeze_acquisition: bool = True) -> Optional[str]:
         """
         Capture oscilloscope display screenshot
-        
+
         ✓ VERIFIED: HARDcopy and DISPlay commands from manual pages 515-534
+
+        Args:
+            filename: Custom filename (None = auto-generate with timestamp)
+            image_format: Image format ("PNG", "BMP", or "BMP8bit")
+            include_timestamp: Include timestamp in auto-generated filename
+            freeze_acquisition: If True, stops acquisition before screenshot and resumes after
+                              This prevents signal disappearance during long timebase acquisitions
+
+        Returns:
+            str: Path to saved screenshot file, or None if failed
+
+        Note: For long timebase settings (20s, 50s), freeze_acquisition=True is recommended
+        to prevent the signal from disappearing during screenshot capture.
         """
         if not self.is_connected:
             self._logger.error("Cannot capture screenshot: not connected")
             return None
 
+        acquisition_was_running = False
+
         try:
             self.setup_output_directories()
+
+            # FREEZE ACQUISITION: Stop the scope to preserve the current waveform
+            if freeze_acquisition:
+                try:
+                    # Check if acquisition is running by querying operation complete
+                    # If scope is running, stop it to freeze the display
+                    self._logger.info("Stopping acquisition to freeze display for screenshot")
+                    self.stop()
+                    acquisition_was_running = True
+                    time.sleep(0.2)  # Allow scope to settle after stop
+                except Exception as e:
+                    self._logger.warning(f"Could not stop acquisition: {e}")
 
             if filename is None:
                 timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -1657,6 +1765,7 @@ class KeysightDSOX6004A:
             screenshot_path = self.screenshot_dir / filename
 
             # SCPI: :DISPlay:DATA? {PNG|BMP|BMP8bit} (pg 424)
+            self._logger.info(f"Capturing screenshot in {image_format} format")
             image_data = self._scpi_wrapper.query_binary_values(
                 f":DISPlay:DATA? {image_format}",
                 datatype='B'
@@ -1666,11 +1775,30 @@ class KeysightDSOX6004A:
                 with open(screenshot_path, 'wb') as f:
                     f.write(bytes(image_data))
                 self._logger.info(f"Screenshot saved: {screenshot_path}")
+
+                # RESUME ACQUISITION: Restart the scope if it was running
+                if freeze_acquisition and acquisition_was_running:
+                    try:
+                        self._logger.info("Resuming acquisition (RUN mode)")
+                        self.run()
+                        time.sleep(0.1)
+                    except Exception as e:
+                        self._logger.warning(f"Could not restart acquisition: {e}")
+
                 return str(screenshot_path)
 
             return None
         except Exception as e:
             self._logger.error(f"Screenshot capture failed: {e}")
+
+            # RESUME ACQUISITION: Make sure to restart even if screenshot failed
+            if freeze_acquisition and acquisition_was_running:
+                try:
+                    self._logger.info("Resuming acquisition after error")
+                    self.run()
+                except Exception as resume_error:
+                    self._logger.error(f"Failed to resume acquisition: {resume_error}")
+
             return None
 
     def setup_output_directories(self) -> None:
