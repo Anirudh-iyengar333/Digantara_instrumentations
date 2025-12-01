@@ -211,7 +211,7 @@ python scripts\keysight\keysight_oscilloscope_gradio_en.py
 After launching, you'll see console output similar to:
 ```
 Running on local URL:  http://127.0.0.1:7860
-Running on network:    http://192.168.1.100:7860
+Running on network:   http://192.168.128.175:7860
 ```
 
 Open your browser and navigate to:
@@ -586,7 +586,7 @@ The Keysight DSOX6004A interface provides waveform capture, analysis, and screen
 
 - **Connection Type**: Choose USB or LAN
   - USB: Enter VISA address (`USB0::0x0957::...::INSTR`)
-  - LAN: Enter IP address (e.g., `192.168.1.100`)
+  - LAN: Enter IP address (e.g., `192.168.128.175`)
 - Click **"Connect"**
 - Instrument ID displays upon successful connection
 
@@ -807,7 +807,7 @@ Digantara_instrumentation/
 │   │   ├── keithley_dmm_gradio_automation.py     # DMM standalone GUI
 │   │   └── keithley_power_supply_automation.py   # Legacy PSU interface
 │   └── keysight/
-│       ├── keysight_oscilloscope_gradio_en.py    # Oscilloscope GUI (English)
+│       ├── keysight_oscilloscope_gradio_en.py    # Oscilloscope GUI (Enhanced)
 │       ├── keysight_oscilloscope_gradio.py       # Oscilloscope GUI (minimal)
 │       ├── keysight_oscilloscope_main.py         # Oscilloscope main interface
 │       └── keysight_oscilloscope_main_with_livefeed.py  # With live waveform
@@ -1006,7 +1006,7 @@ OUTPUT_DIR = "/home/user/test_data"         # Linux/macOS
 4. **Verify network settings (for LAN connection):**
    ```bash
    # Ping instrument IP address:
-   ping 192.168.1.100
+   ping 192.168.128.175
 
    # Should receive replies with low latency (<10ms)
    ```
@@ -1178,7 +1178,7 @@ USB Connection:
 USB0::0x05E6::0x2230::805224014806770001::INSTR
 
 LAN/Ethernet Connection:
-TCPIP0::192.168.1.100::inst0::INSTR
+TCPIP0::192.168.128.175::inst0::INSTR
 
 GPIB Connection (legacy):
 GPIB0::12::INSTR
@@ -1298,7 +1298,7 @@ WAVeform:DATA?
 
 3. **Access from remote computer:**
    - Browser: `http://[computer-IP]:7860`
-   - Example: `http://192.168.1.100:7860`
+   - Example: `http://192.168.128.175:7860`
 
 **Multiple Users:**
 
@@ -1459,7 +1459,7 @@ Suggestions for improvements are welcome! Contact the development team with:
 
 **Lead Developer**: Anirudh Iyengar
 **Organization**: Digantara Research and Technologies Pvt. Ltd.
-**Department**: Lab Automation & Test Engineering
+**Department**: SPD
 **Contact**: anirudh.iyengar@digantara.co.in
 
 **License**: MIT License
@@ -1530,8 +1530,7 @@ Special thanks to:
 
 ---
 
-**Document Version**: 2.0
-**Last Updated**: 2025-12-01
+**Document Version**: 1.0
 **For Software Version**: 1.0.0
 
 For the latest documentation and updates, contact Digantara Research and Technologies.
