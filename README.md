@@ -8,9 +8,7 @@
 
 A comprehensive web-based automation framework providing unified control of precision laboratory test equipment through an intuitive browser interface. Designed for electronics testing, hardware validation, and research and development workflows.
 
-**Developed by:** Anirudh Iyengar
-
-
+**Developed by:** Anirudh Iyengar  
 **Organization:** Digantara Research and Technologies Pvt. Ltd.
 
 ---
@@ -698,12 +696,12 @@ The Digantara Instrumentation Control Suite follows a layered architecture patte
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    Web Browser Interface                    │
-│              (Gradio UI - HTML/CSS/JavaScript)              │
+│               Web Browser Interface                         │
+│                 (Gradio UI )                                │
 └──────────────────────┬──────────────────────────────────────┘
-                       │ HTTP/WebSocket
-┌──────────────────────▼──────────────────────────────────────┐
-│              Gradio Application Server (Python)             │
+                       │ 
+┌──────────────────────▼─────────────────────────────────────┐
+│              Gradio Application Server (Python)            │
 │  ┌────────────┬──────────────────┬──────────────────────┐  │
 │  │  DMM GUI   │   PSU GUI        │  Oscilloscope GUI    │  │
 │  │ Controller │   Controller     │   Controller         │  │
@@ -711,7 +709,7 @@ The Digantara Instrumentation Control Suite follows a layered architecture patte
 └─────────┼───────────┼───────────────────┼──────────────────┘
           │           │                   │
 ┌─────────▼───────────▼───────────────────▼──────────────────┐
-│            Instrument Driver Layer (Python Classes)         │
+│            Instrument Driver Layer (Python Classes)        │
 │  ┌──────────────┬────────────────────┬──────────────────┐  │
 │  │ KeithleyDMM  │  KeithleyPSU       │  KeysightScope   │  │
 │  │ Class        │  Class             │  Class           │  │
@@ -719,9 +717,9 @@ The Digantara Instrumentation Control Suite follows a layered architecture patte
 └─────────┼──────────────┼────────────────────┼──────────────┘
           │              │                    │
 ┌─────────▼──────────────▼────────────────────▼──────────────┐
-│              PyVISA Communication Layer                     │
-│         (SCPI Command Translation & Error Handling)         │
-└──────────────────────┬──────────────────────────────────────┘
+│              PyVISA Communication Layer                    │
+│         (SCPI Command Translation & Error Handling)        │
+└──────────────────────┬─────────────────────────────────────┘
                        │
 ┌──────────────────────▼──────────────────────────────────────┐
 │                   VISA Backend Driver                       │
@@ -735,7 +733,7 @@ The Digantara Instrumentation Control Suite follows a layered architecture patte
                        │
 ┌──────────────────────▼──────────────────────────────────────┐
 │                Physical Instruments                         │
-│        (Keithley PSU, DMM, Keysight Oscilloscope)          │
+│        (Keithley PSU, DMM, Keysight Oscilloscope)           │
 └─────────────────────────────────────────────────────────────┘
 ```
 
