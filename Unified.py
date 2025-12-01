@@ -8,8 +8,7 @@
 ║  PURPOSE:                                                                      ║
 ║    Production-grade lab automation system providing unified web-based control ║
 ║    of multiple test instruments through a single interface. Designed for      ║
-║    electronics characterization, automated test equipment (ATE), and R&D. 
-with branch testing                                                              ║
+║    electronics characterization, automated test equipment (ATE), and R&D.     ║
 ║                                                                                ║
 ║  SUPPORTED INSTRUMENTS:                                                        ║
 ║    • Keithley DMM6500 - 6.5 Digit Digital Multimeter                         ║
