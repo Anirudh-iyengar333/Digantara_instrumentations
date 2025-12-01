@@ -47,7 +47,7 @@
 ║              │                                                                ║
 ║              ▼                                                                ║
 ║    ┌────────────────────────────────────────────────────────┐                 ║
-║    │ PyVISA Communication Layer (Thread-Safe)                │                ║
+║    │ PyVISA Communication Layer (Thread-Safe)               │                 ║
 ║    │  ├─ KeithleyDMM6500 Driver                             │                 ║
 ║    │  ├─ KeithleyPowerSupply Driver                         │                 ║
 ║    │  └─ KeysightDSOX6004A Driver                           │                 ║
