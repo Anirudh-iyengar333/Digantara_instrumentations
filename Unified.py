@@ -3,33 +3,33 @@
 """
 ╔════════════════════════════════════════════════════════════════════════════════╗
 ║    UNIFIED INSTRUMENT CONTROL SYSTEM - PROFESSIONAL GRADIO INTERFACE           ║
-║    Comprehensive control for lab instruments with integrated tabbed interface   ║
+║    Comprehensive control for lab instruments with integrated tabbed interface  ║
 ║                                                                                ║
 ║  PURPOSE:                                                                      ║
-║    Production-grade lab automation system providing unified web-based control ║
-║    of multiple test instruments through a single interface. Designed for      ║
-║    electronics characterization, automated test equipment (ATE), and R&D.     ║
+║    Production-grade lab automation system providing unified web-based control  ║
+║    of multiple test instruments through a single interface. Designed for       ║
+║    electronics characterization, automated test equipment (ATE), and R&D.      ║
 ║                                                                                ║
 ║  SUPPORTED INSTRUMENTS:                                                        ║
-║    • Keithley DMM6500 - 6.5 Digit Digital Multimeter                         ║
-║      └─ DC/AC V/I, 2W/4W Resistance, Capacitance, Frequency, Temperature     ║
+║    • Keithley DMM6500 - 6.5 Digit Digital Multimeter                           ║
+║      └─ DC/AC V/I, 2W/4W Resistance, Capacitance, Frequency, Temperature       ║
 ║                                                                                ║
-║    • Keithley 2230-30-1 - Triple Channel DC Power Supply                     ║
-║      └─ 3× Independent Channels (30V/3A), Waveform Generation (4 types)      ║
+║    • Keithley 2230-30-1 - Triple Channel DC Power Supply                       ║
+║      └─ 3× Independent Channels (30V/3A), Waveform Generation (4 types)        ║
 ║                                                                                ║
-║    • Keysight DSOX6004A - 4-Channel Mixed Signal Oscilloscope                ║
-║      └─ 1 GHz BW, 20 GSa/s, Advanced Triggers, Math Functions                ║
+║    • Keysight DSOX6004A - 4-Channel Mixed Signal Oscilloscope                  ║
+║      └─ 1 GHz BW, 20 GSa/s, Advanced Triggers, Math Functions                  ║
 ║                                                                                ║
 ║  CORE FEATURES:                                                                ║
-║    ✓ Multi-threaded responsive web UI using Gradio framework                 ║
-║    ✓ Real-time data acquisition with statistical analysis                    ║
-║    ✓ Advanced waveform generation (Sine, Square, Triangle, Ramp)             ║
-║    ✓ Comprehensive data export (CSV, JSON, Excel) with timestamps            ║
-║    ✓ Live plotting with matplotlib (trend analysis, waveforms)               ║
-║    ✓ Thread-safe VISA communication with automatic error recovery            ║
-║    ✓ Emergency stop capability for safety-critical operations                ║
-║                                                                                ║
-║  ARCHITECTURE:                                                                 ║
+║    ✓ Multi-threaded responsive web UI using Gradio framework                   ║
+║    ✓ Real-time data acquisition with statistical analysis                      ║
+║    ✓ Advanced waveform generation (Sine, Square, Triangle, Ramp)              ║
+║    ✓ Comprehensive data export (CSV, JSON, Excel) with timestamps             ║
+║    ✓ Live plotting with matplotlib (trend analysis, waveforms)                ║
+║    ✓ Thread-safe VISA communication with automatic error recovery             ║
+║    ✓ Emergency stop capability for safety-critical operations                 ║
+║                                                                               ║
+║  ARCHITECTURE:                                                                ║
 ║    ┌─────────────────────────────────────────────────────────────┐            ║
 ║    │ Gradio Web Interface (Port 7860-7869)                       │            ║
 ║    │  ┌────────────┬────────────────┬──────────────────┐         │            ║
@@ -44,55 +44,55 @@
 ║    │  ├─ PowerSupplyAutomationGradio                        │                 ║
 ║    │  └─ GradioOscilloscopeGUI                              │                 ║
 ║    └─────────┬──────────────────────────────────────────────┘                 ║
-║              │                                                                 ║
-║              ▼                                                                 ║
+║              │                                                                ║
+║              ▼                                                                ║
 ║    ┌────────────────────────────────────────────────────────┐                 ║
-║    │ PyVISA Communication Layer (Thread-Safe)                │                 ║
+║    │ PyVISA Communication Layer (Thread-Safe)                │                ║
 ║    │  ├─ KeithleyDMM6500 Driver                             │                 ║
 ║    │  ├─ KeithleyPowerSupply Driver                         │                 ║
 ║    │  └─ KeysightDSOX6004A Driver                           │                 ║
 ║    └─────────┬──────────────────────────────────────────────┘                 ║
-║              │                                                                 ║
-║              ▼                                                                 ║
+║              │                                                                ║
+║              ▼                                                                ║
 ║    ┌────────────────────────────────────────────────────────┐                 ║
 ║    │ VISA Backend (Keysight IO Suite / NI-VISA)             │                 ║
 ║    │  └─ USB/TCPIP/GPIB Communication                       │                 ║
 ║    └────────────────────────────────────────────────────────┘                 ║
-║                                                                                ║
-║  SYSTEM REQUIREMENTS:                                                          ║
+║                                                                               ║
+║  SYSTEM REQUIREMENTS:                                                         ║
 ║    • Python 3.7+ (Recommended: 3.9+)                                          ║
 ║    • PyVISA 1.11+ for SCPI/VISA instrument communication                      ║
-║    • Keysight IO Libraries Suite OR NI-VISA runtime                          ║
-║    • Gradio 3.x/4.x for web interface framework                              ║
+║    • Keysight IO Libraries Suite OR NI-VISA runtime                           ║
+║    • Gradio 3.x/4.x for web interface framework                               ║
 ║    • Matplotlib 3.x for real-time plotting                                    ║
 ║    • NumPy 1.20+ for statistical operations                                   ║
 ║    • Pandas 1.3+ for data management                                          ║
-║    • OS: Windows 10/11, Linux (Ubuntu 20.04+), macOS 11+                     ║
-║                                                                                ║
-║  THREADING MODEL:                                                              ║
-║    • Main Thread: Gradio event loop and UI updates                           ║
-║    • DMM Worker: Continuous measurement daemon thread                        ║
-║    • PSU Worker: Waveform execution background thread                        ║
-║    • All VISA I/O: Protected by threading.RLock() for thread safety          ║
-║                                                                                ║
-║  SAFETY FEATURES:                                                              ║
+║    • OS: Windows 10/11, Linux (Ubuntu 20.04+), macOS 11+                      ║
+║                                                                               ║
+║  THREADING MODEL:                                                             ║
+║    • Main Thread: Gradio event loop and UI updates                            ║
+║    • DMM Worker: Continuous measurement daemon thread                         ║
+║    • PSU Worker: Waveform execution background thread                         ║
+║    • All VISA I/O: Protected by threading.RLock() for thread safety           ║
+║                                                                               ║
+║  SAFETY FEATURES:                                                             ║
 ║    • Emergency stop button (disables all PSU outputs immediately)             ║
 ║    • Automatic output disable on waveform completion/error                    ║
 ║    • Over-voltage protection (OVP) configuration per channel                  ║
 ║    • Connection state validation before all operations                        ║
-║    • Graceful shutdown with signal handlers (SIGINT/SIGTERM)                 ║
-║                                                                                ║
-║  AUTHOR INFORMATION:                                                           ║
-║    Organization: DIGANTARA Research and Technologies Pvt. Ltd.               ║
+║    • Graceful shutdown with signal handlers (SIGINT/SIGTERM)                  ║
+║                                                                               ║
+║  AUTHOR INFORMATION:                                                          ║
+║    Organization: DIGANTARA Research and Technologies Pvt. Ltd.                ║
 ║    Team: Lab Automation & Test Engineering                                    ║
 ║    Version: 1.0.0 (2025-11-18)                                                ║
-║    Status: Production Ready                                                    ║
-║                                                                                ║
-║  CHANGE LOG:                                                                   ║
+║    Status: Production Ready                                                   ║
+║                                                                               ║
+║  CHANGE LOG:                                                                  ║
 ║    2025-11-18: Fixed waveform duration estimation to include VISA overhead    ║
-║               Added INSTRUMENT_OVERHEAD_PER_POINT constant (~1.95s)          ║
-║                                                                                ║
-╚════════════════════════════════════════════════════════════════════════════════╝
+║               Added INSTRUMENT_OVERHEAD_PER_POINT constant (~1.95s)           ║
+║                                                                               ║
+╚═══════════════════════════════════════════════════════════════════════════════╝
 """
 
 # ════════════════════════════════════════════════════════════════════════════
