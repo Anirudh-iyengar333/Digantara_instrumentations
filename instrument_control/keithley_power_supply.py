@@ -325,11 +325,14 @@ class KeithleyPowerSupply:
             return False
 
         try:
-            self._instrument.write(f":INSTrument:SELect CH{channel}")
-            time.sleep(0.1)
-            self._instrument.write(f":SOURce:VOLTage {voltage}")
-            time.sleep(self._voltage_settling_time)
-            self._logger.debug(f"CH{channel} voltage set to {voltage}V")
+            # Use APPLY command which directly sets voltage on specific channel
+            # This is more reliable than SELECT + SOURCE pattern for multi-channel
+            # Format: APPLY CH{channel},{voltage}
+
+            self._instrument.write(f":APPLY CH{channel},{voltage}")
+            time.sleep(0.1)  # Delay for command to complete
+
+            self._logger.debug(f"CH{channel} voltage set to {voltage:.4f}V using APPLY")
             return True
         except Exception as e:
             self._logger.error(f"Failed to set voltage on channel {channel}: {e}")
@@ -391,7 +394,7 @@ class KeithleyPowerSupply:
 
         try:
             self._instrument.write(f":INSTrument:SELect CH{channel}")
-            time.sleep(0.1)
+            time.sleep(0.3)  # Increased from 0.1s to 0.3s for proper channel switching
             current_str = self._instrument.query(":MEASure:CURRent?").strip()
 
             # Parse numeric value from response
@@ -448,12 +451,12 @@ class KeithleyPowerSupply:
 
             # Select channel
             self._instrument.write(f":INSTrument:SELect CH{channel}")
-            time.sleep(0.05)  # Reduced from 0.5s to 0.05s
+            time.sleep(0.3)  # Increased to 0.3s for reliable channel switching
 
             # Measure voltage
             voltage_str = self._instrument.query(":MEASure:VOLTage?").strip()
             self._logger.info(f"Raw voltage response: '{voltage_str}'")
-            time.sleep(0.05)  # Reduced from 0.5s to 0.05s
+            time.sleep(0.2)  # Increased to 0.2s between measurements
 
             # Measure current
             current_str = self._instrument.query(":MEASure:CURRent?").strip()
@@ -501,3 +504,124 @@ class KeithleyPowerSupply:
                 self._instrument.timeout = original_timeout
             except Exception as restore_err:
                 self._logger.debug(f"Failed to restore timeout: {restore_err}")
+
+    def clear_protection(self, channel: int = None) -> bool:
+        """
+        Attempt to clear protection trip state (OVP/OCP) for a specific channel or all channels.
+
+        ⚠️ IMPORTANT: The Keithley 2230 has a LATCHED OVP protection that typically requires
+        a PHYSICAL POWER CYCLE to fully clear. This method attempts software reset, but if
+        the front panel still shows "Over Voltage", you MUST:
+
+        1. Turn OFF the power supply using the front panel power button
+        2. Wait 5 seconds
+        3. Turn ON the power supply again
+        4. The OVP indicator should clear
+
+        This method will log an instruction message if software reset doesn't work.
+
+        Args:
+            channel: Channel number (1-max_channels), or None to clear all channels
+
+        Returns:
+            True if software commands sent successfully (does NOT guarantee OVP cleared)
+
+        Example:
+            >>> psu.clear_protection(2)  # Attempt to clear CH2 OVP
+            >>> # If front panel still shows OVP, physically power cycle the PSU
+        """
+        if not self.is_connected:
+            self._logger.error("Cannot clear protection: not connected")
+            return False
+
+        try:
+            if channel is not None:
+                # Clear specific channel
+                if not (1 <= channel <= self.max_channels):
+                    self._logger.error(f"Invalid channel {channel}")
+                    return False
+
+                self._logger.info(f"Clearing protection state on CH{channel}")
+
+                # Step 1: Select the channel that tripped OVP
+                self._instrument.write(f":INSTrument:SELect CH{channel}")
+                time.sleep(0.2)
+
+                # Step 2: Turn output OFF to clear the OVP latch (per Keithley manual)
+                # This is the KEY step - OUTPUT:STATe OFF clears the protection
+                self._logger.info(f"CH{channel}: Turning output OFF to clear OVP latch")
+                self._instrument.write("OUTPUT:STATe OFF")
+                time.sleep(0.5)
+
+                # Step 3: Clear system errors
+                self._instrument.write("SYSTem:ERRor:CLEar")
+                time.sleep(0.3)
+
+                # Step 4: Clear standard event status
+                self._instrument.write("*CLS")
+                time.sleep(0.3)
+
+                # Step 5: Wait for operation complete
+                self._instrument.write("*WAI")
+                time.sleep(0.3)
+
+                # Step 6: Turn output back ON (this completes the reset cycle)
+                self._logger.info(f"CH{channel}: Turning output ON to complete reset")
+                self._instrument.write("OUTPUT:STATe ON")
+                time.sleep(0.5)
+
+                # Step 7: Immediately turn OFF again (leave in safe state)
+                self._instrument.write("OUTPUT:STATe OFF")
+                time.sleep(0.3)
+
+                # Step 8: Final operation complete check
+                self._instrument.query("*OPC?")
+
+                # Log completion and instructions
+                self._logger.warning(f"═══════════════════════════════════════════════════════════")
+                self._logger.warning(f"CH{channel} SOFTWARE RESET COMPLETE")
+                self._logger.warning(f"⚠️  IF FRONT PANEL STILL SHOWS 'OVER VOLTAGE':")
+                self._logger.warning(f"    1. Turn OFF the PSU (front panel power button)")
+                self._logger.warning(f"    2. Wait 5 seconds")
+                self._logger.warning(f"    3. Turn ON the PSU")
+                self._logger.warning(f"    4. OVP indicator should clear")
+                self._logger.warning(f"═══════════════════════════════════════════════════════════")
+
+                return True
+            else:
+                # Clear all channels
+                self._logger.info("Clearing protection state on all channels")
+
+                # Process each channel individually with full reset sequence
+                for ch in range(1, self.max_channels + 1):
+                    # Select channel
+                    self._instrument.write(f":INSTrument:SELect CH{ch}")
+                    time.sleep(0.2)
+
+                    # Turn output OFF to clear OVP (per manual)
+                    self._instrument.write("OUTPUT:STATe OFF")
+                    time.sleep(0.5)
+
+                    # Cycle output ON then OFF to complete reset
+                    self._instrument.write("OUTPUT:STATe ON")
+                    time.sleep(0.5)
+                    self._instrument.write("OUTPUT:STATe OFF")
+                    time.sleep(0.3)
+
+                # Clear all system errors
+                self._instrument.write("SYSTem:ERRor:CLEar")
+                time.sleep(0.3)
+
+                # Global clear
+                self._instrument.write("*CLS")
+                time.sleep(0.3)
+                self._instrument.write("*WAI")
+                time.sleep(0.3)
+                self._instrument.query("*OPC?")
+
+                self._logger.info("All channels protection cleared and reset")
+                return True
+
+        except Exception as e:
+            self._logger.error(f"Failed to clear protection: {e}")
+            return False

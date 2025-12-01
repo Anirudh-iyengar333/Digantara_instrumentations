@@ -5,9 +5,10 @@ class SCPIWrapper:
     def __init__(self, visa_address: str, timeout_ms: int = 10000):
         if not visa_address or not isinstance(visa_address, str):
             raise ValueError("visa_address must be a non-empty string")
-        
+
         self._visa_address = visa_address
         self._timeout_ms = timeout_ms
+        self._default_timeout_ms = timeout_ms  # Store default timeout
         self._resource_manager: Optional[pyvisa.ResourceManager] = None
         self._instrument: Any = None  # pyvisa Resource object (use Any to avoid type errors)
         self._is_connected = False
@@ -61,3 +62,22 @@ class SCPIWrapper:
         if not self.is_connected or not self._instrument:
             raise ConnectionError("Instrument not connected")
         return self._instrument.read_raw()
+
+    def set_timeout(self, timeout_ms: int) -> None:
+        """Set VISA timeout dynamically"""
+        if not self.is_connected or not self._instrument:
+            raise ConnectionError("Instrument not connected")
+        self._timeout_ms = timeout_ms
+        self._instrument.timeout = timeout_ms
+
+    def reset_timeout(self) -> None:
+        """Reset timeout to default value"""
+        if not self.is_connected or not self._instrument:
+            raise ConnectionError("Instrument not connected")
+        self._timeout_ms = self._default_timeout_ms
+        self._instrument.timeout = self._default_timeout_ms
+
+    @property
+    def timeout(self) -> int:
+        """Get current timeout in milliseconds"""
+        return self._timeout_ms

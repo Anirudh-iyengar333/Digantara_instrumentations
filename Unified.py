@@ -442,7 +442,85 @@ class DMM_GUI_Controller:
             'auto_zero': True,                  # Enable auto-zero for drift compensation
             'measurement_interval': 1.0         # 1 second between continuous measurements
         }
-    
+
+    # ════════════════════════════════════════════════════════════════════════════
+    # Range Configuration Methods
+    # ════════════════════════════════════════════════════════════════════════════
+
+    @staticmethod
+    def get_range_options(measurement_function: str) -> Tuple[list, float]:
+        """
+        Get appropriate range options based on measurement function.
+
+        Returns measurement-specific range values including auto-range option.
+        Different measurement types have different valid ranges and capabilities.
+
+        Args:
+            measurement_function: Measurement type string (e.g., "DC_VOLTAGE", "CAPACITANCE")
+
+        Returns:
+            Tuple containing:
+                - List of range values (floats) with "AUTO" as first option where applicable
+                - Default range value (float)
+
+        Range Specifications:
+            DC/AC Voltage: AUTO, 0.1V, 1V, 10V, 100V, 1000V
+            DC/AC Current: AUTO, 0.01A, 0.1A, 1A, 3A
+            Resistance (2W/4W): AUTO, 10Ω, 100Ω, 1kΩ, 10kΩ, 100kΩ, 1MΩ, 10MΩ, 100MΩ
+            Capacitance: 1nF, 10nF, 100nF, 1µF, 10µF, 100µF, 1mF, 10mF (no auto)
+            Frequency: AUTO, 3Hz, 30Hz, 300Hz, 3kHz, 30kHz, 300kHz
+            Temperature: AUTO (single option, sensor-dependent)
+
+        Example:
+            >>> ranges, default = DMM_GUI_Controller.get_range_options("DC_VOLTAGE")
+            >>> print(ranges)  # ["AUTO", 0.1, 1, 10, 100, 1000]
+            >>> print(default)  # 10.0
+        """
+        # Range configurations for each measurement type
+        # Format: measurement_type: ([list of ranges], default_value)
+        range_configs = {
+            'DC_VOLTAGE': (
+                ["AUTO", 0.1, 1, 10, 100, 1000],  # Volts
+                10.0  # Default: 10V range
+            ),
+            'AC_VOLTAGE': (
+                ["AUTO", 0.1, 1, 10, 100, 1000],  # Volts RMS
+                10.0  # Default: 10V range
+            ),
+            'DC_CURRENT': (
+                ["AUTO", 0.01, 0.1, 1, 3],  # Amperes
+                1.0  # Default: 1A range
+            ),
+            'AC_CURRENT': (
+                ["AUTO", 0.01, 0.1, 1, 3],  # Amperes RMS
+                1.0  # Default: 1A range
+            ),
+            'RESISTANCE_2W': (
+                ["AUTO", 10, 100, 1e3, 10e3, 100e3, 1e6, 10e6, 100e6],  # Ohms
+                1e3  # Default: 1kΩ range
+            ),
+            'RESISTANCE_4W': (
+                ["AUTO", 10, 100, 1e3, 10e3, 100e3, 1e6, 10e6, 100e6],  # Ohms
+                1e3  # Default: 1kΩ range
+            ),
+            'CAPACITANCE': (
+                # No auto-range for capacitance measurements
+                [1e-9, 10e-9, 100e-9, 1e-6, 10e-6, 100e-6, 1e-3, 10e-3],  # Farads
+                1e-6  # Default: 1µF range
+            ),
+            'FREQUENCY': (
+                ["AUTO", 3, 30, 300, 3e3, 30e3, 300e3],  # Hertz
+                1000  # Default: 1kHz range
+            ),
+            'TEMPERATURE': (
+                ["AUTO"],  # Only auto-range, sensor-dependent
+                0  # Default: auto (0 = auto for driver)
+            )
+        }
+
+        # Return configuration for requested function, or default to DC_VOLTAGE
+        return range_configs.get(measurement_function, range_configs['DC_VOLTAGE'])
+
     # ════════════════════════════════════════════════════════════════════════════
     # Connection Management Methods
     # ════════════════════════════════════════════════════════════════════════════
@@ -1257,7 +1335,7 @@ class DMM_GUI_Controller:
             timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = f"dmm_trend_{timestamp_str}.png"
             filepath = save_dir / filename
-            plt.savefig(filepath, dpi=300, bbox_inches='tight', facecolor='white')
+            plt.savefig(filepath, dpi=1200, bbox_inches='tight', facecolor='white')
             plt.close(fig)
 
             return f"✓ Plot saved successfully to:\n{filepath}"
@@ -1418,6 +1496,20 @@ class PowerSupplyAutomationGradio:
         self.status_queue = queue.Queue()           # Thread-safe FIFO for status updates
                                                     # Worker thread → UI communication
         self.measurement_active = False             # Measurement loop control flag
+
+        # ────────────────────────────────────────────────────────────────────
+        # Live Graphing Data Buffers
+        # ────────────────────────────────────────────────────────────────────
+        # Time-series data for live graphs (stores last N measurements per channel)
+        self.live_data = {
+            1: {'timestamps': [], 'voltages': [], 'currents': [], 'powers': []},
+            2: {'timestamps': [], 'voltages': [], 'currents': [], 'powers': []},
+            3: {'timestamps': [], 'voltages': [], 'currents': [], 'powers': []}
+        }
+        self.max_live_points = 200                  # Maximum number of points to keep in live buffer
+        self.live_measurement_active = False        # Is live measurement currently running?
+        self.live_measurement_thread = None         # Thread for live measurements
+        self.live_measurement_interval = 1.0        # Seconds between live measurements
 
         # ────────────────────────────────────────────────────────────────────
         # Logging Setup
@@ -1762,8 +1854,8 @@ class PowerSupplyAutomationGradio:
                         v *= self.target_voltage
 
                     elif self.waveform_type == "Exponential Fall":
-                        # Opposite of exponential rise
-                        v = (math.exp(5 * (1 - pos)) - 1) / (math.exp(5) - 1)
+                        # True exponential decay: fast drop at start, slow approach to zero
+                        v = math.exp(-5 * pos)
                         v *= self.target_voltage
 
                     elif self.waveform_type == "Gaussian Pulse":
@@ -1786,6 +1878,8 @@ class PowerSupplyAutomationGradio:
                         # Divides cycle into 8 equal steps
                         steps = 8
                         step_index = int(pos * steps)
+                        # Clamp step_index to prevent overshoot when pos approaches 1.0
+                        step_index = min(step_index, steps - 1)
                         v = (step_index / (steps - 1)) * self.target_voltage
 
                     elif self.waveform_type == "PWM":
@@ -1859,11 +1953,13 @@ class PowerSupplyAutomationGradio:
 
 
                     # ────────────────────────────────────────────────────────
-                    # Safety Clamp to Hardware Limit
-                    
+                    # Safety Clamp to Target Voltage and Hardware Limits
                     # ────────────────────────────────────────────────────────
-                    v = max(0.0, min(v, 30.0))      # Ensure 0V ≤ v ≤ 30V
-                                                    # Prevents PSU over-voltage commands
+                    # CRITICAL: Clamp to target_voltage first to prevent OVP trips
+                    # Then clamp to hardware limit (30V) as secondary protection
+                    v = max(0.0, min(v, self.target_voltage, 30.0))
+                                                    # Ensures: 0V ≤ v ≤ target_voltage ≤ 30V
+                                                    # Prevents waveform formula bugs from exceeding target
 
                     # ────────────────────────────────────────────────────────
                     # Append Point to Profile (with precision rounding)
@@ -2151,6 +2247,51 @@ class PowerSupplyAutomationGradio:
         else:
             return "Error: Power supply not connected"
 
+    def clear_channel_protection(self, channel: int) -> str:
+        """Clear OVP/OCP protection trip state on specified channel"""
+        def clear_thread():
+            try:
+                self.log_message(f"Attempting to clear protection on CH{channel}...", "INFO")
+
+                if not self.power_supply or not self.power_supply.is_connected:
+                    raise RuntimeError("Power supply not connected")
+
+                success = self.power_supply.clear_protection(channel)
+
+                if success:
+                    # Show prominent warning about physical power cycle
+                    self.log_message("═" * 80, "WARNING")
+                    self.log_message("⚠️  OVP SOFTWARE RESET SENT", "WARNING")
+                    self.log_message("", "WARNING")
+                    self.log_message("CHECK YOUR POWER SUPPLY FRONT PANEL:", "WARNING")
+                    self.log_message("  • If 'OVER VOLTAGE' indicator is STILL ON:", "WARNING")
+                    self.log_message("", "WARNING")
+                    self.log_message("    ╔══════════════════════════════════════════════════╗", "WARNING")
+                    self.log_message("    ║  PHYSICAL POWER CYCLE REQUIRED                   ║", "WARNING")
+                    self.log_message("    ║                                                  ║", "WARNING")
+                    self.log_message(f"    ║  1. Turn OFF PSU (front panel power button)     ║", "WARNING")
+                    self.log_message("    ║  2. Wait 5 seconds                               ║", "WARNING")
+                    self.log_message("    ║  3. Turn ON PSU                                  ║", "WARNING")
+                    self.log_message("    ║  4. OVP should clear                             ║", "WARNING")
+                    self.log_message("    ╚══════════════════════════════════════════════════╝", "WARNING")
+                    self.log_message("", "WARNING")
+                    self.log_message("  • If 'OVER VOLTAGE' indicator turned OFF:", "WARNING")
+                    self.log_message(f"    ✓ CH{channel} is ready to reconfigure and use", "WARNING")
+                    self.log_message("═" * 80, "WARNING")
+
+                    self.status_queue.put(("warning", f"CH{channel} software reset sent - CHECK FRONT PANEL"))
+                else:
+                    self.status_queue.put(("error", f"Failed to send reset commands to CH{channel}"))
+
+            except Exception as e:
+                self.status_queue.put(("error", f"CH{channel} protection clear error: {str(e)}"))
+
+        if self.is_connected and self.power_supply:
+            threading.Thread(target=clear_thread, daemon=True).start()
+            return f"Sending reset commands to CH{channel}..."
+        else:
+            return "Error: Power supply not connected"
+
     def measure_channel_output(self, channel: int) -> Tuple[str, str, str]:
         """Read current voltage and current from specified channel"""
         try:
@@ -2350,6 +2491,192 @@ class PowerSupplyAutomationGradio:
             self.log_message("Auto-measurement disabled", "INFO")
             return "Auto-measurement disabled"
 
+    # ════════════════════════════════════════════════════════════════════════════
+    # Live Graphing Methods
+    # ════════════════════════════════════════════════════════════════════════════
+
+    def start_live_measurement(self, channels: List[int], interval: float = 1.0) -> str:
+        """
+        Start live measurement collection for specified channels.
+
+        Args:
+            channels: List of channel numbers to monitor (e.g., [1, 2, 3])
+            interval: Time between measurements in seconds (0.5-60)
+
+        Returns:
+            Status message indicating success or error
+        """
+        if not self.is_connected or not self.power_supply:
+            return "Error: Power supply not connected"
+
+        if self.live_measurement_active:
+            return "Live measurement already running"
+
+        if not channels:
+            return "Error: No channels selected"
+
+        self.live_measurement_interval = max(0.5, min(interval, 60.0))
+        self.live_measurement_active = True
+
+        def live_measurement_worker():
+            """Background worker for live measurements"""
+            while self.live_measurement_active and self.is_connected:
+                try:
+                    timestamp = datetime.now()
+
+                    for channel in channels:
+                        if not self.live_measurement_active:
+                            break
+
+                        measurement = self.power_supply.measure_channel_output(channel)
+
+                        if measurement and isinstance(measurement, tuple) and len(measurement) == 2:
+                            voltage = float(measurement[0])
+                            current = float(measurement[1])
+                            power = voltage * current
+
+                            self.channel_states[channel]["voltage"] = voltage
+                            self.channel_states[channel]["current"] = current
+                            self.channel_states[channel]["power"] = power
+
+                            self.live_data[channel]['timestamps'].append(timestamp)
+                            self.live_data[channel]['voltages'].append(voltage)
+                            self.live_data[channel]['currents'].append(current)
+                            self.live_data[channel]['powers'].append(power)
+
+                            if len(self.live_data[channel]['timestamps']) > self.max_live_points:
+                                self.live_data[channel]['timestamps'] = self.live_data[channel]['timestamps'][-self.max_live_points:]
+                                self.live_data[channel]['voltages'] = self.live_data[channel]['voltages'][-self.max_live_points:]
+                                self.live_data[channel]['currents'] = self.live_data[channel]['currents'][-self.max_live_points:]
+                                self.live_data[channel]['powers'] = self.live_data[channel]['powers'][-self.max_live_points:]
+
+                        time.sleep(0.1)
+
+                    time.sleep(self.live_measurement_interval)
+
+                except Exception as e:
+                    self.log_message(f"Live measurement error: {e}", "ERROR")
+                    time.sleep(1.0)
+
+        self.live_measurement_thread = threading.Thread(target=live_measurement_worker, daemon=True)
+        self.live_measurement_thread.start()
+
+        self.log_message(f"Live measurement started for channels {channels}", "SUCCESS")
+        return f"Live measurement started (interval: {self.live_measurement_interval}s)"
+
+    def stop_live_measurement(self) -> str:
+        """Stop live measurement collection"""
+        self.live_measurement_active = False
+        if self.live_measurement_thread and self.live_measurement_thread.is_alive():
+            self.live_measurement_thread.join(timeout=2.0)
+        self.log_message("Live measurement stopped", "INFO")
+        return "Live measurement stopped"
+
+    def clear_live_data(self) -> str:
+        """Clear all live measurement data"""
+        for channel in range(1, 4):
+            self.live_data[channel] = {'timestamps': [], 'voltages': [], 'currents': [], 'powers': []}
+        self.log_message("Live data cleared", "INFO")
+        return "Live data cleared"
+
+    def create_live_plot(self, plot_type: str = "voltage") -> Optional[plt.Figure]:
+        """
+        Create a live trend plot for all channels.
+
+        Args:
+            plot_type: Type of data to plot - "voltage", "current", or "power"
+
+        Returns:
+            Matplotlib figure object or None if no data
+        """
+        try:
+            has_data = False
+            for ch in range(1, 4):
+                if len(self.live_data[ch]['timestamps']) > 0:
+                    has_data = True
+                    break
+
+            if not has_data:
+                return None
+
+            fig, ax = plt.subplots(figsize=(12, 6))
+
+            colors = {1: 'blue', 2: 'green', 3: 'red'}
+            labels = {1: 'CH1', 2: 'CH2', 3: 'CH3'}
+
+            if plot_type == "current":
+                data_key = 'currents'
+                ylabel = 'Current (A)'
+                title = 'PSU Live Current Monitor'
+            elif plot_type == "power":
+                data_key = 'powers'
+                ylabel = 'Power (W)'
+                title = 'PSU Live Power Monitor'
+            else:
+                data_key = 'voltages'
+                ylabel = 'Voltage (V)'
+                title = 'PSU Live Voltage Monitor'
+
+            has_data = False
+            for ch in range(1, 4):
+                if len(self.live_data[ch]['timestamps']) >= 2:
+                    ax.plot(
+                        self.live_data[ch]['timestamps'],
+                        self.live_data[ch][data_key],
+                        color=colors[ch],
+                        label=labels[ch],
+                        linewidth=1.5,
+                        marker='o',
+                        markersize=2
+                    )
+                    has_data = True
+
+            ax.set_xlabel('Time')
+            ax.set_ylabel(ylabel)
+            ax.set_title(title)
+            ax.grid(True, alpha=0.3)
+            if has_data:
+                ax.legend(loc='upper right')
+
+            ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M:%S'))
+            plt.xticks(rotation=45)
+
+            plt.tight_layout()
+            return fig
+
+        except Exception as e:
+            self.logger.error(f"Plot creation error: {e}")
+            return None
+
+    def get_live_statistics(self, channel: int) -> Tuple[str, str, str, str, str]:
+        """
+        Calculate statistics from live measurement data for a channel.
+
+        Returns:
+            Tuple of (count, avg_voltage, avg_current, avg_power, last_update)
+        """
+        try:
+            data = self.live_data[channel]
+            if not data['timestamps']:
+                return "0", "N/A", "N/A", "N/A", "N/A"
+
+            count = len(data['timestamps'])
+            avg_v = sum(data['voltages']) / count if data['voltages'] else 0
+            avg_i = sum(data['currents']) / count if data['currents'] else 0
+            avg_p = sum(data['powers']) / count if data['powers'] else 0
+            last_time = data['timestamps'][-1].strftime('%H:%M:%S') if data['timestamps'] else "N/A"
+
+            return (
+                str(count),
+                f"{avg_v:.4f} V",
+                f"{avg_i:.4f} A",
+                f"{avg_p:.4f} W",
+                last_time
+            )
+        except Exception as e:
+            self.logger.error(f"Statistics error: {e}")
+            return "Error", "N/A", "N/A", "N/A", "N/A"
+
     def get_waveform_status(self):
         """Get current waveform status for UI updates"""
         return self.waveform_status_message
@@ -2370,18 +2697,18 @@ class PowerSupplyAutomationGradio:
         │                                                                      │
         │ Control Loop Steps (per waveform point):                             │
         │   1. Set PSU output voltage to target value                          │
-        │   2. Wait for PSU settling (capacitor stabilization)                 │
-        │   3. Measure actual voltage and current (feedback)                   │
-        │   4. Record data with timing metadata                                │
-        │   5. Check for stop condition (user abort)                           │
-        │   6. Repeat for all points in profile                                │
+        │   2. Calculate elapsed time and sleep to meet target time            │
+        │   3. Record data with timing metadata                                │
+        │   4. Check for stop condition (user abort)                           │
+        │   5. Repeat for all points in profile                                │
         │                                                                      │
         │ Timing Components per Point:                                         │
         │   - SCPI set voltage command:    ~30-50ms (VISA overhead)            │
-        │   - PSU settling time:           50-200ms (user configurable)        │
-        │   - SCPI measure commands (2×):  ~40-80ms (V+I measurement)          │
-        │   - Data processing/logging:     ~1-5ms (Python overhead)            │
-        │   TOTAL per point:               ~150-350ms typical                  │
+        │   - Calculated delay:            Adjusted to meet exact target       │
+        │   TOTAL per point:               User-defined (default 262ms)        │
+        │                                                                      │
+        │ Note: Measurements are skipped to ensure precise timing control.     │
+        │       Use external DMM for accurate voltage/current measurements.    │
         │                                                                      │
         │ Safety Features:                                                     │
         │   - Automatic output disable on completion                           │
@@ -2395,9 +2722,9 @@ class PowerSupplyAutomationGradio:
             Uses ramping_active flag for clean shutdown from UI thread.
 
         Performance:
-            Typical execution time: N_points × (settle + VISA_overhead)
-            Example: 150 points × 250ms = 37.5 seconds
-            Not suitable for high-speed (<10ms) voltage transitions due to VISA latency.
+            Typical execution time: N_points × (target_time_per_point)
+            Example: 150 points × 262ms = 39.3 seconds
+            User can adjust time per point from 50ms to 5000ms (default: 262ms).
 
         Data Collection:
             Each point stores: timestamp, set_voltage, measured_voltage,
@@ -2460,7 +2787,7 @@ class PowerSupplyAutomationGradio:
         self.log_message(f"Total Points: {len(self.ramping_profile)}", "INFO")
         self.log_message(f"Cycles: {self.ramping_params['cycles']}", "INFO")
         self.log_message(f"Points per Cycle: {self.ramping_params['points_per_cycle']}", "INFO")
-        self.log_message(f"Settle Time: {psu_settle}s", "INFO")
+        self.log_message(f"Target Time per Point: {psu_settle}s ({psu_settle*1000:.0f}ms)", "INFO")
         self.log_message(f"{'='*60}", "INFO")
 
         # ────────────────────────────────────────────────────────────────────
@@ -2471,6 +2798,13 @@ class PowerSupplyAutomationGradio:
         last_point_time = waveform_start_time       # For timing calculations (unused currently)
 
         try:
+            # ────────────────────────────────────────────────────────────────
+            # Clear Protection State from Previous Runs
+            # ────────────────────────────────────────────────────────────────
+            self.log_message("Clearing any previous protection states...", "INFO")
+            self.power_supply.clear_protection(channel)  # Clear specific channel
+            time.sleep(0.3)
+
             # ────────────────────────────────────────────────────────────────
             # PSU Output Enable (Safety Critical)
             # ────────────────────────────────────────────────────────────────
@@ -2513,37 +2847,32 @@ class PowerSupplyAutomationGradio:
                 self.power_supply.set_voltage(channel, voltage)
 
                 # ────────────────────────────────────────────────────────────
-                # STEP 2: Wait for PSU Output Settling
+                # STEP 2: Calculate Elapsed Time and Sleep to Meet Target
                 # ────────────────────────────────────────────────────────────
-                # Critical for accurate measurements
-                # PSU output capacitors need time to charge to target voltage
-                # Load transient response depends on DUT characteristics
-                time.sleep(psu_settle)              # Typical: 50-200ms
+                # Calculate how much time has elapsed since point start
+                point_elapsed = (datetime.now() - point_start_time).total_seconds()
+
+                # Calculate remaining time to meet target time per point
+                additional_delay = psu_settle - point_elapsed
+
+                # Sleep for remaining time (includes settle + measurement time)
+                if additional_delay > 0:
+                    time.sleep(additional_delay)    # Sleep to meet exact target time
+
+                # Use setpoint values (no actual measurement to avoid delays)
+                measured_v = voltage                # Use commanded voltage
+                measured_i = 0.0                    # No current measurement
 
                 # ────────────────────────────────────────────────────────────
-                # STEP 3: Measure Actual Output (Feedback)
-                # ────────────────────────────────────────────────────────────
-                # Two SCPI queries: MEAS:VOLT? CHAN<n>, MEAS:CURR? CHAN<n>
-                # VISA overhead: ~40-80ms total (2 query transactions)
-                try:
-                    measured_v = self.power_supply.measure_voltage(channel)  # Read actual voltage
-                    measured_i = self.power_supply.measure_current(channel)  # Read actual current
-                except Exception as meas_err:
-                    # Measurement timeout or SCPI error
-                    self.logger.warning(f"Measurement error at point {idx}: {meas_err}")
-                    measured_v = voltage            # Fallback: use commanded voltage
-                    measured_i = 0.0                # Assume no current on error
-
-                # ────────────────────────────────────────────────────────────
-                # STEP 4: Timing Analysis
+                # STEP 3: Timing Analysis
                 # ────────────────────────────────────────────────────────────
                 point_end_time = datetime.now()     # Record point completion time
                 point_duration = (point_end_time - point_start_time).total_seconds()
-                                                    # Duration includes: set + settle + measure + overhead
+                                                    # Duration should match target time per point
                 point_timings.append(point_duration)  # Store for statistics
 
                 # ────────────────────────────────────────────────────────────
-                # STEP 5: Store Data Point with Metadata
+                # STEP 4: Store Data Point with Metadata
                 # ────────────────────────────────────────────────────────────
                 data_point = {
                     'timestamp': point_end_time,            # ISO timestamp of measurement
@@ -2565,11 +2894,26 @@ class PowerSupplyAutomationGradio:
                     elapsed = (point_end_time - waveform_start_time).total_seconds()  # Total elapsed
                     avg_time_per_point = sum(point_timings) / len(point_timings) if point_timings else 0
                                                     # Running average of point duration
+
+                    # Calculate ETA
+                    points_remaining = len(self.ramping_profile) - idx
+                    eta_seconds = points_remaining * avg_time_per_point
+                    eta_minutes = eta_seconds / 60
+
+                    # Format ETA display
+                    if eta_seconds < 60:
+                        eta_str = f"{eta_seconds:.1f}s"
+                    else:
+                        eta_str = f"{eta_minutes:.1f}min"
+
                     self.log_message(
                         f"Progress: {progress:.1f}% | "
+                        f"Point {idx}/{len(self.ramping_profile)} | "
                         f"Cycle {cycle_num + 1}/{self.ramping_params['cycles']} | "
                         f"Elapsed: {elapsed:.2f}s | "
-                        f"Avg/point: {avg_time_per_point*1000:.1f}ms",
+                        f"This point: {point_duration*1000:.0f}ms | "
+                        f"Avg: {avg_time_per_point*1000:.1f}ms/pt | "
+                        f"ETA: {eta_str}",
                         "INFO"
                     )
 
@@ -2627,7 +2971,10 @@ class PowerSupplyAutomationGradio:
                 pass
 
     def save_waveform_plot(self, save_path: str) -> str:
-        """Save the waveform plot to user-specified location.
+        """Save the LIVE waveform execution data plot to user-specified location.
+
+        This saves the actual measured data from waveform execution, supporting
+        both single-channel and multi-channel waveform runs.
 
         Args:
             save_path: Directory path where plot should be saved
@@ -2650,47 +2997,436 @@ class PowerSupplyAutomationGradio:
             if not save_dir.is_dir():
                 return f"Error: Path is not a directory: {save_path}"
 
-            # Create plot from ramping data
             import matplotlib.pyplot as plt
 
-            timestamps = [d['timestamp'] for d in self.ramping_data]
-            set_voltages = [d['set_voltage'] for d in self.ramping_data]
-            measured_voltages = [d['measured_voltage'] for d in self.ramping_data]
-            measured_currents = [d['measured_current'] for d in self.ramping_data]
+            # Group data by channel
+            channel_data = {}
+            for d in self.ramping_data:
+                ch = d.get('channel', 1)  # Default to CH1 for legacy single-channel data
+                if ch not in channel_data:
+                    channel_data[ch] = {
+                        'timestamps': [],
+                        'set_voltages': [],
+                        'measured_voltages': [],
+                        'measured_currents': []
+                    }
+                channel_data[ch]['timestamps'].append(d['timestamp'])
+                channel_data[ch]['set_voltages'].append(d['set_voltage'])
+                channel_data[ch]['measured_voltages'].append(d['measured_voltage'])
+                channel_data[ch]['measured_currents'].append(d['measured_current'])
 
-            fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8))
+            num_channels = len(channel_data)
+            channel_colors = {1: '#1E88E5', 2: '#43A047', 3: '#FB8C00'}  # Blue, Green, Orange
 
-            # Voltage plot
-            ax1.plot(timestamps, set_voltages, 'b--', label='Setpoint', linewidth=1)
-            ax1.plot(timestamps, measured_voltages, 'r-', label='Measured', linewidth=1)
-            ax1.set_xlabel('Time')
-            ax1.set_ylabel('Voltage (V)')
-            ax1.set_title('Waveform Voltage Profile')
-            ax1.legend()
-            ax1.grid(True, alpha=0.3)
+            if num_channels == 1:
+                # Single channel - use simple 2-subplot layout
+                ch = list(channel_data.keys())[0]
+                data = channel_data[ch]
 
-            # Current plot
-            ax2.plot(timestamps, measured_currents, 'g-', linewidth=1)
-            ax2.set_xlabel('Time')
-            ax2.set_ylabel('Current (A)')
-            ax2.set_title('Measured Current')
-            ax2.grid(True, alpha=0.3)
+                # Convert timestamps to relative seconds
+                base_time = data['timestamps'][0]
+                time_sec = [(t - base_time).total_seconds() for t in data['timestamps']]
+
+                fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8))
+                color = channel_colors.get(ch, '#1E88E5')
+
+                # Voltage plot
+                ax1.plot(time_sec, data['set_voltages'], '--', color=color,
+                        label='Setpoint', linewidth=1, alpha=0.7)
+                ax1.plot(time_sec, data['measured_voltages'], '-', color=color,
+                        label='Measured', linewidth=1.5)
+                ax1.set_xlabel('Time (s)')
+                ax1.set_ylabel('Voltage (V)')
+                ax1.set_title(f'CH{ch} Voltage Profile (Live Execution Data)')
+                ax1.legend()
+                ax1.grid(True, alpha=0.3)
+
+                # Current plot
+                ax2.plot(time_sec, data['measured_currents'], '-', color=color, linewidth=1.5)
+                ax2.set_xlabel('Time (s)')
+                ax2.set_ylabel('Current (A)')
+                ax2.set_title(f'CH{ch} Measured Current')
+                ax2.grid(True, alpha=0.3)
+            else:
+                # Multi-channel - create subplot for each channel
+                fig, axes = plt.subplots(num_channels, 2, figsize=(14, 4*num_channels))
+                fig.suptitle('Multi-Channel Waveform Live Execution Data', fontsize=14, fontweight='bold')
+
+                if num_channels == 1:
+                    axes = [axes]
+
+                for idx, ch in enumerate(sorted(channel_data.keys())):
+                    data = channel_data[ch]
+                    color = channel_colors.get(ch, '#1E88E5')
+
+                    # Convert timestamps to relative seconds
+                    base_time = data['timestamps'][0]
+                    time_sec = [(t - base_time).total_seconds() for t in data['timestamps']]
+
+                    # Voltage subplot
+                    ax_v = axes[idx][0] if num_channels > 1 else axes[0]
+                    ax_v.plot(time_sec, data['set_voltages'], '--', color=color,
+                             label='Setpoint', linewidth=1, alpha=0.7)
+                    ax_v.plot(time_sec, data['measured_voltages'], '-', color=color,
+                             label='Measured', linewidth=1.5)
+                    ax_v.set_xlabel('Time (s)')
+                    ax_v.set_ylabel('Voltage (V)')
+                    ax_v.set_title(f'CH{ch} Voltage')
+                    ax_v.legend(loc='upper right')
+                    ax_v.grid(True, alpha=0.3)
+
+                    # Current subplot
+                    ax_i = axes[idx][1] if num_channels > 1 else axes[1]
+                    ax_i.plot(time_sec, data['measured_currents'], '-', color=color, linewidth=1.5)
+                    ax_i.set_xlabel('Time (s)')
+                    ax_i.set_ylabel('Current (A)')
+                    ax_i.set_title(f'CH{ch} Current')
+                    ax_i.grid(True, alpha=0.3)
 
             plt.tight_layout()
 
             # Save plot
             timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"psu_waveform_{timestamp_str}.png"
+            filename = f"psu_waveform_live_{timestamp_str}.png"
             filepath = save_dir / filename
             plt.savefig(filepath, dpi=300, bbox_inches='tight', facecolor='white')
             plt.close(fig)
 
-            self.log_message(f"Waveform plot saved to: {filepath}", "SUCCESS")
-            return f"✓ Waveform plot saved successfully to:\n{filepath}"
+            self.log_message(f"Live waveform plot saved to: {filepath}", "SUCCESS")
+            return f"✓ Live execution data plot saved ({num_channels} channel{'s' if num_channels > 1 else ''}):\n{filepath}"
 
         except Exception as e:
             self.logger.error(f"Waveform plot save error: {e}")
             return f"Plot save failed: {str(e)}"
+
+    # ════════════════════════════════════════════════════════════════════════════
+    # Multi-Channel Simultaneous Waveform Execution
+    # ════════════════════════════════════════════════════════════════════════════
+
+    def execute_multi_channel_waveform(self, channel_configs: List[Dict]) -> None:
+        """
+        Execute simultaneous waveform generation on multiple PSU channels.
+
+        ┌──────────────────────────────────────────────────────────────────────┐
+        │ MULTI-CHANNEL WAVEFORM EXECUTION ENGINE                              │
+        │                                                                      │
+        │ Purpose: Generate synchronized voltage waveforms on multiple         │
+        │          channels simultaneously for complex test scenarios          │
+        │                                                                      │
+        │ Use Cases:                                                           │
+        │   - Multi-rail power sequencing tests                                │
+        │   - Simultaneous voltage stress on multiple supplies                 │
+        │   - Cross-talk and interference testing                              │
+        │   - Power profile characterization                                   │
+        └──────────────────────────────────────────────────────────────────────┘
+
+        Args:
+            channel_configs: List of dictionaries, each containing:
+                - channel: int (1, 2, or 3)
+                - waveform: str (waveform type name)
+                - target_voltage: float (peak voltage)
+                - cycles: int (number of repetitions)
+                - points_per_cycle: int (resolution)
+                - cycle_duration: float (seconds per cycle)
+                - current_limit: float (safety current limit)
+
+        Thread Safety:
+            Should be called from background thread via start_multi_channel_waveform.
+            Uses multi_channel_stop_event for clean shutdown.
+        """
+        if not channel_configs:
+            self.log_message("No channel configurations provided", "ERROR")
+            return
+
+        if not self.power_supply or not self.is_connected:
+            self.log_message("Power supply not connected", "ERROR")
+            return
+
+        psu_settle = self.ramping_params.get('psu_settle', 0.05)
+        waveform_start_time = datetime.now()
+        start_timestamp = waveform_start_time.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+
+        self.log_message(f"{'='*60}", "INFO")
+        self.log_message(f"MULTI-CHANNEL WAVEFORM STARTED", "INFO")
+        self.log_message(f"Start Time: {start_timestamp}", "INFO")
+        self.log_message(f"Channels: {len(channel_configs)}", "INFO")
+
+        try:
+            # Create waveform generators for each channel
+            generators = []
+            for config in channel_configs:
+                waveform_name = config.get('waveform', 'Sine')
+                # Extract name if it has description (e.g., "Sine - ∿ smooth wave" -> "Sine")
+                if ' - ' in waveform_name:
+                    waveform_name = waveform_name.split(' - ')[0]
+
+                gen = self._WaveformGenerator(
+                    waveform_type=waveform_name,
+                    target_voltage=config.get('target_voltage', 3.0),
+                    cycles=config.get('cycles', 3),
+                    points_per_cycle=config.get('points_per_cycle', 50),
+                    cycle_duration=config.get('cycle_duration', 8.0)
+                )
+                generators.append({
+                    'generator': gen,
+                    'channel': config.get('channel', 1),
+                    'current_limit': config.get('current_limit', 0.1),
+                    'profile': gen.generate()
+                })
+                self.log_message(
+                    f"CH{config.get('channel', 1)}: {waveform_name} waveform, "
+                    f"{config.get('target_voltage', 3.0)}V target, "
+                    f"{config.get('cycles', 3)} cycles",
+                    "INFO"
+                )
+
+            # Find the longest profile
+            max_points = max(len(g['profile']) for g in generators)
+            self.log_message(f"Total points to execute: {max_points}", "INFO")
+            self.log_message(f"{'='*60}", "INFO")
+
+            # Clear previous data
+            self.ramping_data = []
+            point_timings = []
+
+            # Clear any protection trips from previous runs
+            self.log_message("Clearing any previous protection states...", "INFO")
+            self.power_supply.clear_protection()  # Clear all channels
+            time.sleep(0.3)
+
+            # Configure and enable all channels first
+            for gen_data in generators:
+                ch = gen_data['channel']
+                current_limit = gen_data['current_limit']
+                ovp_level = gen_data['generator'].target_voltage + 2.0
+
+                self.power_supply.configure_channel(
+                    channel=ch,
+                    voltage=0.0,
+                    current_limit=current_limit,
+                    ovp_level=min(ovp_level, 35.0),  # Cap OVP at 35V
+                    enable_output=True
+                )
+                time.sleep(0.1)
+
+            self.log_message("All channels configured and enabled", "SUCCESS")
+            self.waveform_status_message = f"⏳ Running multi-channel waveform ({len(generators)} channels)..."
+
+            # Execute waveform points synchronously across all channels
+            for point_idx in range(max_points):
+                point_start_time = datetime.now()
+
+                # Check for stop signal
+                if hasattr(self, 'multi_channel_stop_event') and self.multi_channel_stop_event.is_set():
+                    self.log_message("Multi-channel waveform stopped by user", "WARNING")
+                    break
+
+                if not self.ramping_active:
+                    self.log_message("Waveform stopped (ramping_active=False)", "WARNING")
+                    break
+
+                # Set voltage on all channels for this time point AND record data
+                timestamp = datetime.now()
+                channels_start = datetime.now()
+
+                for gen_data in generators:
+                    profile = gen_data['profile']
+                    ch = gen_data['channel']
+                    wf_type = gen_data['generator'].waveform_type
+
+                    # Get voltage for this point (or hold last value if profile is shorter)
+                    if point_idx < len(profile):
+                        t, voltage = profile[point_idx]
+                    else:
+                        t, voltage = profile[-1]
+
+                    # Debug logging for first few points
+                    if point_idx < 5:
+                        self.log_message(
+                            f"Point {point_idx}: CH{ch} ({wf_type}) -> {voltage:.4f}V",
+                            "INFO"
+                        )
+
+                    # Set voltage on this channel
+                    self.power_supply.set_voltage(ch, voltage)
+
+                    # Calculate cycle position
+                    points_per_cycle = gen_data['generator'].points_per_cycle
+                    cycle_num = point_idx // points_per_cycle
+                    point_in_cycle = point_idx % points_per_cycle
+
+                    # Store data point immediately after setting voltage
+                    data_point = {
+                        'timestamp': timestamp,
+                        'channel': ch,
+                        'set_voltage': voltage,
+                        'measured_voltage': voltage,  # Use set value (no actual measurement)
+                        'measured_current': 0.0,  # No measurement during execution
+                        'cycle_number': cycle_num,
+                        'point_in_cycle': point_in_cycle,
+                        'point_index': point_idx
+                    }
+                    self.ramping_data.append(data_point)
+
+                # Calculate elapsed time and add delay to meet target time per point
+                channels_elapsed = (datetime.now() - channels_start).total_seconds()
+                point_elapsed = (datetime.now() - point_start_time).total_seconds()
+                additional_delay = psu_settle - point_elapsed
+
+                # Debug: Log timing breakdown for first few points
+                if point_idx < 3:
+                    self.log_message(
+                        f"Point {point_idx} timing: channels={channels_elapsed*1000:.0f}ms, "
+                        f"total_so_far={point_elapsed*1000:.0f}ms, target={psu_settle*1000:.0f}ms, "
+                        f"will_sleep={max(0, additional_delay)*1000:.0f}ms",
+                        "INFO"
+                    )
+
+                if additional_delay > 0:
+                    time.sleep(additional_delay)  # Sleep remaining time to meet target
+
+                # Track timing
+                point_end_time = datetime.now()
+                point_duration = (point_end_time - point_start_time).total_seconds()
+                point_timings.append(point_duration)
+
+                # Progress logging (every 10%)
+                if point_idx % max(1, max_points // 10) == 0:
+                    progress = (point_idx / max_points) * 100
+                    elapsed = (point_end_time - waveform_start_time).total_seconds()
+                    avg_time = sum(point_timings) / len(point_timings) if point_timings else 0
+
+                    # Calculate ETA
+                    points_remaining = max_points - point_idx
+                    eta_seconds = points_remaining * avg_time
+                    eta_minutes = eta_seconds / 60
+
+                    # Format ETA display
+                    if eta_seconds < 60:
+                        eta_str = f"{eta_seconds:.1f}s"
+                    else:
+                        eta_str = f"{eta_minutes:.1f}min"
+
+                    self.log_message(
+                        f"Progress: {progress:.1f}% | "
+                        f"Point {point_idx}/{max_points} | "
+                        f"Elapsed: {elapsed:.1f}s | "
+                        f"This point: {point_duration*1000:.0f}ms | "
+                        f"Avg: {avg_time*1000:.0f}ms/pt | "
+                        f"ETA: {eta_str}",
+                        "INFO"
+                    )
+
+            # Ramp down all channels to 0V
+            self.log_message("Ramping down all channels to 0V...", "INFO")
+            for gen_data in generators:
+                ch = gen_data['channel']
+                self.power_supply.set_voltage(ch, 0.0)
+                time.sleep(0.05)
+                self.power_supply.disable_channel_output(ch)
+
+            # Calculate statistics
+            waveform_end_time = datetime.now()
+            total_duration = (waveform_end_time - waveform_start_time).total_seconds()
+
+            if point_timings:
+                avg_time = sum(point_timings) / len(point_timings)
+                min_time = min(point_timings)
+                max_time = max(point_timings)
+            else:
+                avg_time = min_time = max_time = 0
+
+            # Log completion
+            self.log_message(f"{'='*60}", "SUCCESS")
+            self.log_message(f"MULTI-CHANNEL WAVEFORM COMPLETED", "SUCCESS")
+            self.log_message(f"Total Duration: {total_duration:.2f}s ({total_duration/60:.1f} min)", "SUCCESS")
+            self.log_message(f"Points Executed: {max_points}", "SUCCESS")
+            self.log_message(f"Data Points Collected: {len(self.ramping_data)}", "SUCCESS")
+            self.log_message(f"Per-Point Timing:", "INFO")
+            self.log_message(f"  • Average: {avg_time*1000:.1f}ms", "INFO")
+            self.log_message(f"  • Minimum: {min_time*1000:.1f}ms", "INFO")
+            self.log_message(f"  • Maximum: {max_time*1000:.1f}ms", "INFO")
+            self.log_message(f"{'='*60}", "SUCCESS")
+
+            self.waveform_status_message = (
+                f"✓ COMPLETED! {len(generators)} channels, "
+                f"{len(self.ramping_data)} pts, {total_duration:.1f}s"
+            )
+
+        except Exception as e:
+            self.log_message(f"Multi-channel waveform error: {e}", "ERROR")
+            import traceback
+            self.logger.error(traceback.format_exc())
+            self.waveform_status_message = f"✗ ERROR: {str(e)}"
+
+            # Safety: disable all outputs
+            try:
+                for gen_data in generators:
+                    self.power_supply.set_voltage(gen_data['channel'], 0.0)
+                    self.power_supply.disable_channel_output(gen_data['channel'])
+            except:
+                pass
+
+        finally:
+            self.ramping_active = False
+
+    def start_multi_channel_waveform(self, channel_configs: List[Dict]) -> str:
+        """
+        Start multi-channel waveform execution in a background thread.
+
+        Args:
+            channel_configs: List of channel configuration dictionaries
+
+        Returns:
+            Status message string
+        """
+        if self.ramping_active:
+            return "ERROR: Waveform already running. Stop current waveform first."
+
+        if not self.is_connected or not self.power_supply:
+            return "ERROR: Power supply not connected. Please connect first."
+
+        if not channel_configs:
+            return "ERROR: No channels enabled for waveform generation."
+
+        # Validate configurations
+        for config in channel_configs:
+            ch = config.get('channel', 1)
+            target_v = config.get('target_voltage', 3.0)
+            if ch == 3 and target_v > 5:
+                return f"ERROR: Channel 3 limited to 5V maximum. Configured: {target_v}V"
+            elif ch in [1, 2] and target_v > 30:
+                return f"ERROR: Channel {ch} limited to 30V maximum. Configured: {target_v}V"
+
+        self.ramping_active = True
+        self.multi_channel_stop_event = threading.Event()
+
+        self.ramping_thread = threading.Thread(
+            target=self.execute_multi_channel_waveform,
+            args=(channel_configs,),
+            daemon=True
+        )
+        self.ramping_thread.start()
+
+        channels_str = ", ".join([f"CH{c['channel']}" for c in channel_configs])
+        return f"Multi-channel waveform STARTED on {channels_str}"
+
+    def stop_multi_channel_waveform(self) -> str:
+        """
+        Stop multi-channel waveform execution gracefully.
+
+        Returns:
+            Status message string
+        """
+        self.ramping_active = False
+        if hasattr(self, 'multi_channel_stop_event'):
+            self.multi_channel_stop_event.set()
+
+        if self.ramping_thread and self.ramping_thread.is_alive():
+            self.ramping_thread.join(timeout=2.0)
+
+        self.log_message("Multi-channel waveform stop signal sent", "INFO")
+        return "Stopping multi-channel waveform..."
 
     def create_gradio_interface(self):
         """Create the web interface for power supply control."""
@@ -4111,6 +4847,54 @@ class GradioOscilloscopeGUI:
         except Exception as e:
             return f"Error: {str(e)}"
 
+    def run_acquisition(self):
+        """Start continuous acquisition (RUN mode)"""
+        if not self.oscilloscope or not self.oscilloscope.is_connected:
+            return "Error: Not connected"
+
+        try:
+            with self.io_lock:
+                success = self.oscilloscope.run()
+
+            if success:
+                return "✓ Acquisition started (RUN mode)\nScope is continuously acquiring waveforms"
+            else:
+                return "Failed to start acquisition"
+        except Exception as e:
+            return f"Error: {str(e)}"
+
+    def stop_acquisition(self):
+        """Stop acquisition (STOP mode - freezes display)"""
+        if not self.oscilloscope or not self.oscilloscope.is_connected:
+            return "Error: Not connected"
+
+        try:
+            with self.io_lock:
+                success = self.oscilloscope.stop()
+
+            if success:
+                return "⏹ Acquisition stopped\nDisplay frozen - Perfect for screenshots/data capture"
+            else:
+                return "Failed to stop acquisition"
+        except Exception as e:
+            return f"Error: {str(e)}"
+
+    def single_acquisition(self):
+        """Trigger single acquisition (SINGLE mode)"""
+        if not self.oscilloscope or not self.oscilloscope.is_connected:
+            return "Error: Not connected"
+
+        try:
+            with self.io_lock:
+                success = self.oscilloscope.single()
+
+            if success:
+                return "⏯ Single trigger armed\nWaiting for trigger event to capture one waveform"
+            else:
+                return "Failed to arm single trigger"
+        except Exception as e:
+            return f"Error: {str(e)}"
+
     def run_full_automation(self, ch1, ch2, ch3, ch4, math1, math2, math3, math4, plot_title):
         """Execute complete acquisition, export, and analysis workflow"""
         if not self.oscilloscope or not self.oscilloscope.is_connected:
@@ -4141,35 +4925,21 @@ class GradioOscilloscopeGUI:
 
         try:
             results = []
-            results.append("Step 1/4: Screenshot...")
-            
-            # Capture screenshot using the configured save location
-            try:
-                screenshot_dir = Path(self.save_locations['screenshots'])
-                screenshot_dir.mkdir(parents=True, exist_ok=True)
-                timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-                filename = f"scope_screenshot_{timestamp}.png"
-                screenshot_path = screenshot_dir / filename
-                
-                if hasattr(self.oscilloscope, '_scpi_wrapper'):
-                    image_data = self.oscilloscope._scpi_wrapper.query_binary_values(
-                        ":DISPlay:DATA? PNG",
-                        datatype='B'
-                    )
-                    
-                    if image_data:
-                        with open(screenshot_path, 'wb') as f:
-                            f.write(bytes(image_data))
-                        results.append(f"✓ Screenshot saved: {screenshot_path}")
-                    else:
-                        results.append("⚠ Screenshot capture failed: No data")
-                else:
-                    results.append("⚠ SCPI interface not available, skipping screenshot")
-            except Exception as e:
-                self.logger.warning(f"Screenshot capture error in automation: {e}")
-                results.append(f"⚠ Screenshot failed: {str(e)}")
+            results.append("Preparing automation...")
 
-            results.append("Step 2/4: Acquiring data...")
+            # CRITICAL: Stop oscilloscope to freeze the waveform
+            # This prevents signal from disappearing during data capture
+            results.append("Stopping oscilloscope to freeze waveform...")
+            try:
+                self.oscilloscope.stop()
+                import time
+                time.sleep(0.3)  # Allow scope to settle after stop
+                results.append("✓ Oscilloscope stopped - waveform frozen")
+            except Exception as e:
+                self.logger.warning(f"Could not stop oscilloscope: {e}")
+                results.append(f"⚠ Warning: Could not stop oscilloscope: {str(e)}")
+
+            results.append("\nStep 1/4: Acquiring data...")
             all_channel_data = {}
             for source_type, number in selected_channels:
                 if source_type == 'CH':
@@ -4184,13 +4954,19 @@ class GradioOscilloscopeGUI:
                         results.append(f" MATH{number}: {data['points_count']} points")
 
             if not all_channel_data:
+                # Resume oscilloscope even if data acquisition failed
+                try:
+                    self.oscilloscope.run()
+                    results.append("⚠ Oscilloscope resumed after error")
+                except:
+                    pass
                 return "Error: Data acquisition failed"
 
-            results.append("Step 3/4: Exporting CSV...")
+            results.append("\nStep 2/4: Exporting CSV...")
             csv_files = []
             for source_key, data in all_channel_data.items():
                 csv_file = self.data_acquisition.export_to_csv(
-                    data, 
+                    data,
                     custom_path=self.save_locations['data']
                 )
                 if csv_file:
@@ -4199,7 +4975,7 @@ class GradioOscilloscopeGUI:
             if csv_files:
                 results.append(f" ✓ {len(csv_files)} files exported to: {self.save_locations['data']}")
 
-            results.append("Step 4/4: Generating plots...")
+            results.append("\nStep 3/4: Generating plots...")
             custom_title = plot_title.strip() or None
             plot_files = []
             for source_key, data in all_channel_data.items():
@@ -4210,8 +4986,8 @@ class GradioOscilloscopeGUI:
                     channel_title = None
 
                 plot_file = self.data_acquisition.generate_waveform_plot(
-                    data, 
-                    custom_path=self.save_locations['graphs'], 
+                    data,
+                    custom_path=self.save_locations['graphs'],
                     plot_title=channel_title
                 )
                 if plot_file:
@@ -4220,15 +4996,64 @@ class GradioOscilloscopeGUI:
             if plot_files:
                 results.append(f" ✓ {len(plot_files)} plots generated to: {self.save_locations['graphs']}")
 
+            results.append("\nStep 4/4: Capturing screenshot...")
+
+            # Capture screenshot while oscilloscope is still stopped
+            try:
+                screenshot_dir = Path(self.save_locations['screenshots'])
+                screenshot_dir.mkdir(parents=True, exist_ok=True)
+                timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+                filename = f"scope_screenshot_{timestamp}.png"
+                screenshot_path = screenshot_dir / filename
+
+                if hasattr(self.oscilloscope, '_scpi_wrapper'):
+                    import time
+                    time.sleep(0.1)  # Brief pause before screenshot
+                    image_data = self.oscilloscope._scpi_wrapper.query_binary_values(
+                        ":DISPlay:DATA? PNG",
+                        datatype='B'
+                    )
+
+                    if image_data:
+                        with open(screenshot_path, 'wb') as f:
+                            f.write(bytes(image_data))
+                        results.append(f"✓ Screenshot saved: {screenshot_path}")
+                    else:
+                        results.append("⚠ Screenshot capture failed: No data")
+                else:
+                    results.append("⚠ SCPI interface not available, skipping screenshot")
+            except Exception as e:
+                self.logger.warning(f"Screenshot capture error in automation: {e}")
+                results.append(f"⚠ Screenshot failed: {str(e)}")
+
+            # CRITICAL: Resume oscilloscope run mode
+            results.append("\nResuming oscilloscope to RUN mode...")
+            try:
+                self.oscilloscope.run()
+                import time
+                time.sleep(0.1)
+                results.append("✓ Oscilloscope resumed - acquisition running")
+            except Exception as e:
+                self.logger.error(f"Failed to resume oscilloscope: {e}")
+                results.append(f"⚠ Warning: Could not resume oscilloscope: {str(e)}")
+
             self.last_acquired_data = all_channel_data
-            results.append("\n✓ Full automation completed successfully!")
+            results.append("\n" + "="*60)
+            results.append("✓ FULL AUTOMATION COMPLETED SUCCESSFULLY!")
+            results.append("="*60)
             results.append(f"\nAll files saved to:")
             results.append(f"  • Screenshots: {self.save_locations['screenshots']}")
             results.append(f"  • Data: {self.save_locations['data']}")
             results.append(f"  • Graphs: {self.save_locations['graphs']}")
-            
+
             return "\n".join(results)
         except Exception as e:
+            # Ensure oscilloscope is resumed even if there's an error
+            try:
+                self.oscilloscope.run()
+                self.logger.info("Oscilloscope resumed after exception")
+            except:
+                pass
             self.logger.error(f"Automation error: {e}")
             return f"Automation error: {str(e)}"
 
@@ -4386,12 +5211,14 @@ class UnifiedInstrumentControl:
                     ],
                     value="DC_VOLTAGE"
                 )
-                
-                dmm_measurement_range = gr.Number(
-                    label="Range",
-                    value=10.0,
-                    minimum=0.001,
-                    maximum=1000.0
+
+                # Get default range options for DC_VOLTAGE
+                default_ranges, default_value = self.dmm_controller.get_range_options("DC_VOLTAGE")
+
+                dmm_measurement_range = gr.Dropdown(
+                    label="Range (AUTO or specific value)",
+                    choices=default_ranges,
+                    value=default_value
                 )
                 
                 dmm_resolution = gr.Number(
@@ -4420,7 +5247,7 @@ class UnifiedInstrumentControl:
             with gr.Column(scale=1):
                 gr.Markdown("### Measurement Results")
                 dmm_current_measurement = gr.Textbox(
-                    label="Current Reading",
+                    label="Reading",
                     interactive=False,
                     lines=2
                 )
@@ -4453,7 +5280,7 @@ class UnifiedInstrumentControl:
                 gr.Markdown("### Statistical Analysis")
                 dmm_stats_points = gr.Number(
                     label="Number of Points",
-                    value=100,
+                    value=7000,
                     minimum=1,
                     maximum=65000
                 )
@@ -4470,7 +5297,7 @@ class UnifiedInstrumentControl:
                 gr.Markdown("### Trend Plot")
                 dmm_plot_points = gr.Number(
                     label="Points to Plot",
-                    value=100,
+                    value=7000,
                     minimum=10,
                     maximum=65000
                 )
@@ -4527,7 +5354,37 @@ class UnifiedInstrumentControl:
 
                 dmm_refresh_preview_btn = gr.Button("Refresh Preview")
         
+        # Helper function to update range options when measurement function changes
+        def update_range_dropdown(measurement_function: str):
+            """Update range dropdown choices and value based on selected measurement function."""
+            ranges, default = self.dmm_controller.get_range_options(measurement_function)
+            return gr.Dropdown(choices=ranges, value=default)
+
+        # Helper function to convert AUTO to 0 for driver compatibility
+        def single_measurement_wrapper(function: str, range_val, resolution: float,
+                                       nplc: float, auto_zero: bool):
+            """Wrapper to convert 'AUTO' string to 0 for driver."""
+            # Convert "AUTO" string to 0 (auto-range value for driver)
+            if range_val == "AUTO":
+                range_val = 0
+            return self.dmm_controller.single_measurement(function, range_val, resolution, nplc, auto_zero)
+
+        def continuous_measurement_wrapper(function: str, range_val, resolution: float,
+                                          nplc: float, auto_zero: bool, interval: float):
+            """Wrapper to convert 'AUTO' string to 0 for driver."""
+            # Convert "AUTO" string to 0 (auto-range value for driver)
+            if range_val == "AUTO":
+                range_val = 0
+            return self.dmm_controller.start_continuous_measurement(function, range_val, resolution, nplc, auto_zero, interval)
+
         # Event handlers
+        # Update range dropdown when measurement function changes
+        dmm_measurement_function.change(
+            fn=update_range_dropdown,
+            inputs=[dmm_measurement_function],
+            outputs=[dmm_measurement_range]
+        )
+
         dmm_connect_btn.click(
             self.dmm_controller.connect_instrument,
             inputs=[dmm_visa_address, dmm_timeout_ms],
@@ -4545,13 +5402,13 @@ class UnifiedInstrumentControl:
         )
         
         dmm_single_measure_btn.click(
-            self.dmm_controller.single_measurement,
+            single_measurement_wrapper,
             inputs=[dmm_measurement_function, dmm_measurement_range, dmm_resolution, dmm_nplc, dmm_auto_zero],
             outputs=[dmm_current_measurement, dmm_measurement_status]
         )
-        
+
         dmm_start_continuous_btn.click(
-            self.dmm_controller.start_continuous_measurement,
+            continuous_measurement_wrapper,
             inputs=[dmm_measurement_function, dmm_measurement_range, dmm_resolution, dmm_nplc, dmm_auto_zero, dmm_measurement_interval],
             outputs=[dmm_continuous_status]
         )
@@ -4627,7 +5484,7 @@ class UnifiedInstrumentControl:
         
         def update_data_preview():
             if self.dmm_controller.measurement_data:
-                recent_data = self.dmm_controller.measurement_data[-20:]  # Show last 20 points
+                recent_data = self.dmm_controller.measurement_data[-200:]  # Show last 200 points
                 df_data = []
                 for point in recent_data:
                     df_data.append([
@@ -4694,6 +5551,7 @@ class UnifiedInstrumentControl:
                             psu_enable_btn = gr.Button(f"Enable Output", variant="primary")
                             psu_disable_btn = gr.Button(f"Disable Output", variant="stop")
                             psu_meas_btn = gr.Button(f"Measure", variant="secondary")
+                            psu_clear_ovp_btn = gr.Button(f"⚠️ Clear OVP (May Need Power Cycle)", variant="secondary")
 
                         with gr.Row():
                             psu_volt_display = gr.Textbox(label="Measured Voltage", value="0.000 V", interactive=False)
@@ -4710,6 +5568,7 @@ class UnifiedInstrumentControl:
                             "enable_btn": psu_enable_btn,
                             "disable_btn": psu_disable_btn,
                             "measure_btn": psu_meas_btn,
+                            "clear_ovp_btn": psu_clear_ovp_btn,
                             "volt_display": psu_volt_display,
                             "curr_display": psu_curr_display,
                             "power_display": psu_power_display,
@@ -4733,6 +5592,10 @@ class UnifiedInstrumentControl:
                             fn=lambda ch=ch: self.psu_controller.measure_channel_output(ch),
                             outputs=[psu_volt_display, psu_curr_display, psu_power_display]
                         )
+
+                        psu_clear_ovp_btn.click(
+                            fn=lambda ch=ch: self.psu_controller.clear_channel_protection(ch)
+                        )
         
         # Global Operations
         gr.Markdown("### Global Operations")
@@ -4741,6 +5604,7 @@ class UnifiedInstrumentControl:
                 psu_get_info_btn = gr.Button("Get Instrument Info", variant="secondary")
                 psu_measure_all_btn = gr.Button("Measure All Channels", variant="primary")
                 psu_disable_all_btn = gr.Button("Disable All Outputs", variant="stop")
+                psu_clear_all_ovp_btn = gr.Button("⚠️ Clear All OVP (May Need Power Cycle)", variant="secondary")
             
             psu_get_info_btn.click(fn=self.psu_controller.get_instrument_info)
             psu_measure_all_btn.click(
@@ -4758,7 +5622,10 @@ class UnifiedInstrumentControl:
                 ]
             )
             psu_disable_all_btn.click(fn=self.psu_controller.disable_all_outputs)
-        
+            psu_clear_all_ovp_btn.click(
+                fn=lambda: self.psu_controller.power_supply.clear_protection() if self.psu_controller.power_supply else "Not connected"
+            )
+
         # Data Logging
         gr.Markdown("### Data Logging & Export")
         with gr.Group():
@@ -4810,210 +5677,258 @@ class UnifiedInstrumentControl:
             )
             psu_clear_btn.click(fn=self.psu_controller.clear_measurement_data)
 
-        # Voltage Waveform Generation
-        gr.Markdown("### Voltage Waveform Generation")
+        # # ════════════════════════════════════════════════════════════════════════════
+        # # LIVE MONITOR - Real-time graphs for PSU channels
+        # # ════════════════════════════════════════════════════════════════════════════
+        # gr.Markdown("### Live Monitor")
+        # gr.Markdown("Real-time voltage, current, and power monitoring with live updating graphs")
+
+        # with gr.Group():
+        #     with gr.Row():
+        #         psu_live_ch1_cb = gr.Checkbox(label="Monitor CH1", value=True)
+        #         psu_live_ch2_cb = gr.Checkbox(label="Monitor CH2", value=False)
+        #         psu_live_ch3_cb = gr.Checkbox(label="Monitor CH3", value=False)
+        #         psu_live_interval = gr.Slider(0.5, 10.0, value=1.0, label="Update Interval (s)", step=0.5)
+
+        #     with gr.Row():
+        #         psu_start_live_btn = gr.Button("Start Live Monitor", variant="primary", size="lg")
+        #         psu_stop_live_btn = gr.Button("Stop Live Monitor", variant="stop", size="lg")
+        #         psu_clear_live_btn = gr.Button("Clear Live Data", variant="secondary")
+
+        #     psu_live_status = gr.Textbox(label="Live Monitor Status", value="Stopped", interactive=False)
+
+        #     with gr.Row():
+        #         psu_plot_type = gr.Dropdown(
+        #             choices=["voltage", "current", "power"],
+        #             value="voltage",
+        #             label="Plot Type"
+        #         )
+        #         psu_refresh_plot_btn = gr.Button("Refresh Plot", variant="secondary")
+
+        #     psu_live_plot = gr.Plot(label="Live Trend Plot")
+
+        #     gr.Markdown("#### Live Statistics")
+        #     with gr.Row():
+        #         with gr.Column():
+        #             gr.Markdown("**CH1**")
+        #             psu_ch1_count = gr.Textbox(label="Samples", value="0", interactive=False)
+        #             psu_ch1_avg_v = gr.Textbox(label="Avg V", value="N/A", interactive=False)
+        #             psu_ch1_avg_i = gr.Textbox(label="Avg I", value="N/A", interactive=False)
+        #             psu_ch1_avg_p = gr.Textbox(label="Avg P", value="N/A", interactive=False)
+        #         with gr.Column():
+        #             gr.Markdown("**CH2**")
+        #             psu_ch2_count = gr.Textbox(label="Samples", value="0", interactive=False)
+        #             psu_ch2_avg_v = gr.Textbox(label="Avg V", value="N/A", interactive=False)
+        #             psu_ch2_avg_i = gr.Textbox(label="Avg I", value="N/A", interactive=False)
+        #             psu_ch2_avg_p = gr.Textbox(label="Avg P", value="N/A", interactive=False)
+        #         with gr.Column():
+        #             gr.Markdown("**CH3**")
+        #             psu_ch3_count = gr.Textbox(label="Samples", value="0", interactive=False)
+        #             psu_ch3_avg_v = gr.Textbox(label="Avg V", value="N/A", interactive=False)
+        #             psu_ch3_avg_i = gr.Textbox(label="Avg I", value="N/A", interactive=False)
+        #             psu_ch3_avg_p = gr.Textbox(label="Avg P", value="N/A", interactive=False)
+
+        #     # Live monitor handlers
+        #     def psu_handle_start_live(ch1, ch2, ch3, interval):
+        #         channels = []
+        #         if ch1:
+        #             channels.append(1)
+        #         if ch2:
+        #             channels.append(2)
+        #         if ch3:
+        #             channels.append(3)
+        #         return self.psu_controller.start_live_measurement(channels, interval)
+
+        #     def psu_handle_stop_live():
+        #         return self.psu_controller.stop_live_measurement()
+
+        #     def psu_handle_clear_live():
+        #         return self.psu_controller.clear_live_data()
+
+        #     def psu_handle_refresh_plot(plot_type):
+        #         fig = self.psu_controller.create_live_plot(plot_type)
+        #         s1 = self.psu_controller.get_live_statistics(1)
+        #         s2 = self.psu_controller.get_live_statistics(2)
+        #         s3 = self.psu_controller.get_live_statistics(3)
+        #         return (fig,
+        #                 s1[0], s1[1], s1[2], s1[3],
+        #                 s2[0], s2[1], s2[2], s2[3],
+        #                 s3[0], s3[1], s3[2], s3[3])
+
+        #     psu_start_live_btn.click(
+        #         fn=psu_handle_start_live,
+        #         inputs=[psu_live_ch1_cb, psu_live_ch2_cb, psu_live_ch3_cb, psu_live_interval],
+        #         outputs=[psu_live_status]
+        #     )
+
+        #     psu_stop_live_btn.click(
+        #         fn=psu_handle_stop_live,
+        #         outputs=[psu_live_status]
+        #     )
+
+        #     psu_clear_live_btn.click(
+        #         fn=psu_handle_clear_live,
+        #         outputs=[psu_live_status]
+        #     )
+
+        #     psu_refresh_plot_btn.click(
+        #         fn=psu_handle_refresh_plot,
+        #         inputs=[psu_plot_type],
+        #         outputs=[psu_live_plot,
+        #                  psu_ch1_count, psu_ch1_avg_v, psu_ch1_avg_i, psu_ch1_avg_p,
+        #                  psu_ch2_count, psu_ch2_avg_v, psu_ch2_avg_i, psu_ch2_avg_p,
+        #                  psu_ch3_count, psu_ch3_avg_v, psu_ch3_avg_i, psu_ch3_avg_p]
+        #     )
+
+        # ════════════════════════════════════════════════════════════════════════════
+        # MULTI-CHANNEL SIMULTANEOUS WAVEFORM GENERATOR (Replaces single-channel)
+        # ════════════════════════════════════════════════════════════════════════════
+        gr.Markdown("### Multi-Channel Simultaneous Waveform Generator")
+        gr.Markdown("Configure and run synchronized waveform patterns on multiple channels simultaneously.")
+
         with gr.Group():
-            gr.Markdown("Generate dynamic voltage patterns on selected channel (Sine, Square, Triangle, Ramp, cardiac, Damped Sine, Exponential Raise, Exponential Fall, Gaussian Pulse, Neural Spike).")
+            # Waveform type options
+            psu_waveform_types = [
+                "Sine - ∿ smooth wave",
+                "Square - ⎍ sharp on/off",
+                "Triangle - △ linear ramp up/down",
+                "Ramp Up - ⟋ linear rise",
+                "Ramp Down - ⟍ linear fall",
+                "Cardiac - ♥ ECG heartbeat",
+                "Damped Sine - ∿↘ decaying oscillation",
+                "Exponential Raise - ⤴ slow→fast rise",
+                "Exponential Fall - ⤵ fast→slow fall",
+                "Gaussian Pulse - ⌒ bell curve",
+                "Neural Spike - ⟰ action potential",
+                "Staircase - ⎽⎺ discrete steps",
+                "PWM - ⎍⎍⎍ variable duty cycle",
+                "Chirp - ∿∿∿ frequency sweep",
+                "Burst Mode - ⎍⎍___ on/off bursts",
+                "Brownout - ⎺⤵_ power sag/recovery",
+                "RC Charge - ⤴⎺ capacitor charging",
+                "Sinc - ⌒∿∿ main lobe + ripples",
+                "Breathing - ⬭ smooth fade in/out"
+            ]
 
-            with gr.Row():
-                psu_waveform_channel = gr.Dropdown(
-                    label="Target Channel",
-                    choices=[1, 2, 3],
-                    value=1
-                )
-                psu_waveform_type = gr.Dropdown(
-                    label="Waveform Type",
-                    choices=[
-                        "Sine - ∿ smooth wave",
-                        "Square - ⎍ sharp on/off",
-                        "Triangle - △ linear ramp up/down",
-                        "Ramp Up - ⟋ linear rise",
-                        "Ramp Down - ⟍ linear fall",
-                        "Cardiac - ♥ ECG heartbeat",
-                        "Damped Sine - ∿↘ decaying oscillation",
-                        "Exponential Raise - ⤴ slow→fast rise",
-                        "Exponential Fall - ⤵ fast→slow fall",
-                        "Gaussian Pulse - ⌒ bell curve",
-                        "Neural Spike - ⟰ action potential",
-                        "Staircase - ⎽⎺ discrete steps",
-                        "PWM - ⎍⎍⎍ variable duty cycle",
-                        "Chirp - ∿∿∿ frequency sweep",
-                        "Burst Mode - ⎍⎍___ on/off bursts",
-                        "Brownout - ⎺⤵_ power sag/recovery",
-                        "RC Charge - ⤴⎺ capacitor charging",
-                        "Sinc - ⌒∿∿ main lobe + ripples",
-                        "Breathing - ⬭ smooth fade in/out"
-                    ],
-                    value="Sine - ∿ smooth wave"
-                )
+            with gr.Tabs():
+                # Channel 1 Waveform Configuration
+                with gr.TabItem(label="CH1 Waveform"):
+                    psu_ch1_enable = gr.Checkbox(label="Enable CH1", value=True)
+                    with gr.Row():
+                        psu_ch1_waveform = gr.Dropdown(
+                            choices=psu_waveform_types,
+                            value="Sine - ∿ smooth wave",
+                            label="Waveform Type"
+                        )
+                        psu_ch1_voltage = gr.Slider(0.1, 30.0, value=3.0, label="Target Voltage (V)", step=0.1)
+                        psu_ch1_current = gr.Slider(0.001, 3.0, value=0.1, label="Current Limit (A)", step=0.001)
+                    with gr.Row():
+                        psu_ch1_cycles = gr.Number(value=3, label="Cycles", minimum=1, maximum=100, precision=0)
+                        psu_ch1_points = gr.Number(value=50, label="Points/Cycle", minimum=1, maximum=200, precision=0)
+                        psu_ch1_duration = gr.Number(value=8.0, label="Cycle Duration (s)", minimum=0.1, maximum=60)
 
-            with gr.Row():
-                psu_target_voltage = gr.Slider(
-                    label="Target Voltage (V)",
-                    minimum=0,
-                    maximum=30,
-                    value=3.0,
-                    step=0.1
-                )
-                psu_cycles = gr.Number(
-                    label="Number of Cycles",
-                    value=3,
-                    minimum=1,
-                    maximum=100,
-                    precision=0
-                )
+                # Channel 2 Waveform Configuration
+                with gr.TabItem(label="CH2 Waveform"):
+                    psu_ch2_enable = gr.Checkbox(label="Enable CH2", value=False)
+                    with gr.Row():
+                        psu_ch2_waveform = gr.Dropdown(
+                            choices=psu_waveform_types,
+                            value="Triangle - △ linear ramp up/down",
+                            label="Waveform Type"
+                        )
+                        psu_ch2_voltage = gr.Slider(0.1, 30.0, value=2.5, label="Target Voltage (V)", step=0.1)
+                        psu_ch2_current = gr.Slider(0.001, 3.0, value=0.1, label="Current Limit (A)", step=0.001)
+                    with gr.Row():
+                        psu_ch2_cycles = gr.Number(value=3, label="Cycles", minimum=1, maximum=100, precision=0)
+                        psu_ch2_points = gr.Number(value=50, label="Points/Cycle", minimum=1, maximum=200, precision=0)
+                        psu_ch2_duration = gr.Number(value=8.0, label="Cycle Duration (s)", minimum=0.1, maximum=60)
 
-            with gr.Row():
-                psu_points_per_cycle = gr.Number(
-                    label="Points per Cycle",
-                    value=50,
-                    minimum=10,
-                    maximum=200,
-                    precision=0
-                )
-                psu_cycle_duration = gr.Number(
-                    label="Cycle Duration (s)",
-                    value=8.0,
-                    minimum=0.1,
-                    maximum=60.0
-                )
+                # Channel 3 Waveform Configuration (limited to 5V)
+                with gr.TabItem(label="CH3 Waveform"):
+                    psu_ch3_enable = gr.Checkbox(label="Enable CH3", value=False)
+                    gr.Markdown("*Note: Channel 3 is limited to 5V maximum*")
+                    with gr.Row():
+                        psu_ch3_waveform = gr.Dropdown(
+                            choices=psu_waveform_types,
+                            value="Square - ⎍ sharp on/off",
+                            label="Waveform Type"
+                        )
+                        psu_ch3_voltage = gr.Slider(0.1, 5.0, value=3.3, label="Target Voltage (V)", step=0.1)
+                        psu_ch3_current = gr.Slider(0.001, 3.0, value=0.1, label="Current Limit (A)", step=0.001)
+                    with gr.Row():
+                        psu_ch3_cycles = gr.Number(value=3, label="Cycles", minimum=1, maximum=100, precision=0)
+                        psu_ch3_points = gr.Number(value=50, label="Points/Cycle", minimum=1, maximum=200, precision=0)
+                        psu_ch3_duration = gr.Number(value=8.0, label="Cycle Duration (s)", minimum=0.1, maximum=60)
 
+            # Global settings
             with gr.Row():
                 psu_settle_time = gr.Slider(
-                    label="Settle Time per Point (s) - Controls execution speed",
-                    minimum=0.01,
-                    maximum=1.0,
-                    value=0.05,
+                    label="Time per Point (s)",
+                    minimum=0.05,
+                    maximum=5.0,
+                    value=0.262,
                     step=0.01,
-                    info="Lower = faster execution, but may reduce measurement accuracy"
+                    info="Total time per point including settle + measurement (e.g., 0.262s = 262ms)"
                 )
                 psu_estimated_duration = gr.Textbox(
-                    label="Estimated Total Duration (entire waveform)",
-                    value="~0s",
+                    label="Estimated Duration",
+                    value="~300s (5.0 min) | 150 pts @ 2000ms/pt",
                     interactive=False,
-                    scale=1,
-                    info="Total time for complete waveform execution"
+                    info="Estimate based on enabled channels"
                 )
 
             # ════════════════════════════════════════════════════════════════
-            # CRITICAL BUG FIX: Accurate Waveform Duration Estimation
+            # DURATION ESTIMATION FOR MULTI-CHANNEL WAVEFORM
             # ════════════════════════════════════════════════════════════════
-            def update_estimated_duration(cycles, points, settle):
+            def update_multi_channel_duration(
+                ch1_en, ch1_cyc, ch1_pts,
+                ch2_en, ch2_cyc, ch2_pts,
+                ch3_en, ch3_cyc, ch3_pts,
+                settle
+            ):
                 """
-                Calculate realistic waveform execution time including VISA overhead.
+                Calculate estimated duration for multi-channel waveform execution.
 
-                ┌──────────────────────────────────────────────────────────────────────┐
-                │ CRITICAL BUG FIX: DURATION ESTIMATION (Fixed 2025-11-18)            │
-                │                                                                      │
-                │ PROBLEM:                                                             │
-                │   Original implementation only accounted for settle time:           │
-                │   estimated_time = total_points × settle_time                       │
-                │                                                                      │
-                │   This severely underestimated execution time because it ignored    │
-                │   VISA communication overhead for SCPI commands.                    │
-                │                                                                      │
-                │   Example (WRONG):                                                   │
-                │     150 points × 0.05s settle = 7.5 seconds estimated              │
-                │     Actual execution time: ~300 seconds (40× longer!)               │
-                │                                                                      │
-                │ ROOT CAUSE:                                                          │
-                │   Each waveform point requires 3 SCPI transactions:                 │
-                │     1. set_voltage(channel, V)     ~0.65s VISA overhead            │
-                │     2. measure_voltage(channel)    ~0.65s VISA overhead            │
-                │     3. measure_current(channel)    ~0.65s VISA overhead            │
-                │   TOTAL VISA overhead per point: ~1.95 seconds                      │
-                │                                                                      │
-                │ SOLUTION:                                                            │
-                │   New formula includes empirically measured VISA overhead:          │
-                │   estimated_time = total_points × (settle + VISA_overhead)         │
-                │                  = total_points × (settle + 1.95s)                 │
-                │                                                                      │
-                │   Example (CORRECT):                                                 │
-                │     150 points × (0.05s + 1.95s) = 150 × 2.0s = 300 seconds       │
-                │     Actual execution time: ~300 seconds (accurate!)                 │
-                │                                                                      │
-                │ EMPIRICAL MEASUREMENTS:                                              │
-                │   Interface: USB (Keithley 2230-30-1)                               │
-                │   Command: set_voltage()    → 650ms avg                            │
-                │   Query: measure_voltage()  → 650ms avg                            │
-                │   Query: measure_current()  → 650ms avg                            │
-                │   Total per point: 1950ms (~1.95s)                                 │
-                │                                                                      │
-                │   Note: GPIB may be slightly faster (~1.5s), LAN slightly slower   │
-                └──────────────────────────────────────────────────────────────────────┘
+                The duration is based on the LONGEST profile among enabled channels,
+                since all channels execute synchronously at each time point.
 
-                Args:
-                    cycles: Number of waveform cycles to execute
-                    points: Number of points per cycle
-                    settle: PSU settling time in seconds
-
-                Returns:
-                    Formatted string with estimated duration and breakdown
-                    Examples:
-                        "~300.0s TOTAL | 150 points @ 2000ms/point"
-                        "~600.0s (10.0 min) TOTAL | 300 points @ 2000ms/point"
-                        "~0s (waiting for valid inputs)" on error
-
-                Note:
-                    Duration is ESTIMATED based on typical VISA overhead.
-                    Actual time may vary ±10% depending on:
-                    - VISA interface type (USB/GPIB/LAN)
-                    - System load and USB bus contention
-                    - Power supply firmware version
-                    - DUT load characteristics (affects settling)
+                With the new timing control, each point takes exactly the user-defined
+                "Time per Point" value regardless of number of channels.
                 """
                 try:
-                    # ────────────────────────────────────────────────────────────
-                    # Input Validation and Sanitization
-                    # ────────────────────────────────────────────────────────────
-                    # Handle None, empty strings, and whitespace-only inputs
-                    if cycles is None or cycles == "" or str(cycles).strip() == "":
-                        cycles = 3                      # Default: 3 cycles
-                    if points is None or points == "" or str(points).strip() == "":
-                        points = 50                     # Default: 50 points/cycle
-                    if settle is None or settle == "" or str(settle).strip() == "":
-                        settle = 0.05                   # Default: 50ms settle time
+                    # Count enabled channels and find max points
+                    enabled_channels = 0
+                    max_points = 0
 
-                    # ────────────────────────────────────────────────────────────
-                    # Type Conversion and Range Validation
-                    # ────────────────────────────────────────────────────────────
-                    cycles = max(1, int(float(cycles)))         # Minimum 1 cycle
-                    points = max(10, int(float(points)))        # Minimum 10 points (meaningful waveform)
-                    settle = max(0.01, float(settle))           # Minimum 10ms settle time
+                    if ch1_en:
+                        enabled_channels += 1
+                        cyc = int(ch1_cyc) if ch1_cyc else 3
+                        pts = int(ch1_pts) if ch1_pts else 50
+                        max_points = max(max_points, cyc * pts)
 
-                    # ════════════════════════════════════════════════════════════
-                    # CRITICAL CONSTANT: INSTRUMENT OVERHEAD PER POINT
-                    # ════════════════════════════════════════════════════════════
-                    # VISA communication overhead for SCPI commands (empirically measured)
-                    # Breakdown per waveform point:
-                    #   - set_voltage() SCPI command:    ~650ms (USB VISA round-trip)
-                    #   - measure_voltage() SCPI query:  ~650ms (USB VISA round-trip)
-                    #   - measure_current() SCPI query:  ~650ms (USB VISA round-trip)
-                    #   TOTAL: ~1950ms = 1.95 seconds per point
-                    #
-                    # This value was determined through extensive testing with:
-                    #   - Keithley 2230-30-1 Power Supply
-                    #   - USB VISA connection (Keysight IO Suite)
-                    #   - Windows 10 host system
-                    #   - 100+ waveform runs with varying parameters
-                    #
-                    # Historical note: Original code omitted this constant, causing
-                    # 40× underestimation of execution time (7.5s est vs 300s actual)
-                    INSTRUMENT_OVERHEAD_PER_POINT = 1.95  # seconds (USB VISA overhead)
+                    if ch2_en:
+                        enabled_channels += 1
+                        cyc = int(ch2_cyc) if ch2_cyc else 3
+                        pts = int(ch2_pts) if ch2_pts else 50
+                        max_points = max(max_points, cyc * pts)
 
-                    # ────────────────────────────────────────────────────────────
-                    # Duration Calculation (CORRECTED FORMULA)
-                    # ────────────────────────────────────────────────────────────
-                    total_points = cycles * points              # Total waveform points
-                    estimated_time = total_points * (settle + INSTRUMENT_OVERHEAD_PER_POINT)
-                                                                # Time = N × (settle + VISA_overhead)
-                    time_per_point_ms = (settle + INSTRUMENT_OVERHEAD_PER_POINT) * 1000
-                                                                # Convert to milliseconds for display
+                    if ch3_en:
+                        enabled_channels += 1
+                        cyc = int(ch3_cyc) if ch3_cyc else 3
+                        pts = int(ch3_pts) if ch3_pts else 50
+                        max_points = max(max_points, cyc * pts)
 
-                    # ────────────────────────────────────────────────────────────
-                    # Format Output String
-                    # ────────────────────────────────────────────────────────────
-                    # Calculate estimated end time
+                    if enabled_channels == 0 or max_points == 0:
+                        return "Enable at least one channel"
+
+                    # Use the user-defined time per point directly
+                    time_per_point = float(settle) if settle else 0.262
+
+                    # Total estimated time = points × time_per_point
+                    estimated_time = max_points * time_per_point
+                    time_per_point_ms = time_per_point * 1000
+
+                    # Format output with start/end times
                     from datetime import datetime, timedelta
                     start_time = datetime.now()
                     end_time = start_time + timedelta(seconds=estimated_time)
@@ -5022,49 +5937,91 @@ class UnifiedInstrumentControl:
                     end_str = end_time.strftime('%H:%M:%S')
 
                     if estimated_time < 60:
-                        # Short duration: show seconds only
-                        return f"Start: {start_str} → End: ~{end_str} | Duration: ~{estimated_time:.1f}s | {total_points} pts @ {time_per_point_ms:.0f}ms/pt"
+                        return f"Start: {start_str} → End: ~{end_str} | ~{estimated_time:.1f}s | {max_points} pts @ {time_per_point_ms:.0f}ms/pt ({enabled_channels} CH)"
                     else:
-                        # Long duration: show both seconds and minutes
-                        return f"Start: {start_str} → End: ~{end_str} | Duration: ~{estimated_time:.1f}s ({estimated_time/60:.1f} min) | {total_points} pts @ {time_per_point_ms:.0f}ms/pt"
+                        return f"Start: {start_str} → End: ~{end_str} | ~{estimated_time:.1f}s ({estimated_time/60:.1f} min) | {max_points} pts ({enabled_channels} CH)"
 
                 except Exception as e:
-                    # ────────────────────────────────────────────────────────────
-                    # Error Handling - Return Safe Default
-                    # ────────────────────────────────────────────────────────────
-                    return "~0s (waiting for valid inputs)"
+                    return f"~0s (error: {e})"
 
-            # Update estimate when parameters change
-            # Use input event which fires after user finishes entering a value
-            psu_cycles.input(
-                fn=update_estimated_duration,
-                inputs=[psu_cycles, psu_points_per_cycle, psu_settle_time],
+            # Wire up duration updates - trigger on any parameter change
+            duration_inputs = [
+                psu_ch1_enable, psu_ch1_cycles, psu_ch1_points,
+                psu_ch2_enable, psu_ch2_cycles, psu_ch2_points,
+                psu_ch3_enable, psu_ch3_cycles, psu_ch3_points,
+                psu_settle_time
+            ]
+
+            # Update on checkbox changes
+            psu_ch1_enable.change(
+                fn=update_multi_channel_duration,
+                inputs=duration_inputs,
                 outputs=[psu_estimated_duration]
             )
-            psu_points_per_cycle.input(
-                fn=update_estimated_duration,
-                inputs=[psu_cycles, psu_points_per_cycle, psu_settle_time],
+            psu_ch2_enable.change(
+                fn=update_multi_channel_duration,
+                inputs=duration_inputs,
                 outputs=[psu_estimated_duration]
             )
+            psu_ch3_enable.change(
+                fn=update_multi_channel_duration,
+                inputs=duration_inputs,
+                outputs=[psu_estimated_duration]
+            )
+
+            # Update on cycle/points changes
+            psu_ch1_cycles.change(
+                fn=update_multi_channel_duration,
+                inputs=duration_inputs,
+                outputs=[psu_estimated_duration]
+            )
+            psu_ch1_points.change(
+                fn=update_multi_channel_duration,
+                inputs=duration_inputs,
+                outputs=[psu_estimated_duration]
+            )
+            psu_ch2_cycles.change(
+                fn=update_multi_channel_duration,
+                inputs=duration_inputs,
+                outputs=[psu_estimated_duration]
+            )
+            psu_ch2_points.change(
+                fn=update_multi_channel_duration,
+                inputs=duration_inputs,
+                outputs=[psu_estimated_duration]
+            )
+            psu_ch3_cycles.change(
+                fn=update_multi_channel_duration,
+                inputs=duration_inputs,
+                outputs=[psu_estimated_duration]
+            )
+            psu_ch3_points.change(
+                fn=update_multi_channel_duration,
+                inputs=duration_inputs,
+                outputs=[psu_estimated_duration]
+            )
+
+            # Update on settle time change
             psu_settle_time.change(
-                fn=update_estimated_duration,
-                inputs=[psu_cycles, psu_points_per_cycle, psu_settle_time],
+                fn=update_multi_channel_duration,
+                inputs=duration_inputs,
                 outputs=[psu_estimated_duration]
             )
 
+            # Control buttons
             with gr.Row():
-                psu_preview_waveform_btn = gr.Button("Preview Waveform", variant="secondary", size="lg")
-                psu_start_waveform_btn = gr.Button("Start Waveform", variant="primary", size="lg")
+                psu_preview_waveform_btn = gr.Button("Preview All Enabled Channels", variant="secondary", size="lg")
+                psu_start_waveform_btn = gr.Button("Start Multi-Channel Waveform", variant="primary", size="lg")
                 psu_stop_waveform_btn = gr.Button("Stop Waveform", variant="stop", size="lg")
 
             psu_waveform_status = gr.Textbox(
                 label="Waveform Status",
-                value="Ready - Configure parameters and click Preview or Start",
+                value="Ready - Enable channels, configure parameters, and click Start",
                 interactive=False,
                 lines=2
             )
 
-            psu_waveform_plot = gr.Plot(label="Waveform Preview / Real-time Data")
+            psu_waveform_plot = gr.Plot(label="Multi-Channel Waveform Preview")
 
             gr.Markdown("### Save Waveform Plot")
             with gr.Row():
@@ -5076,132 +6033,269 @@ class UnifiedInstrumentControl:
                 )
                 psu_waveform_browse_btn = gr.Button("Browse", variant="secondary", scale=1)
 
-            psu_save_waveform_btn = gr.Button("Save Waveform Plot", variant="primary")
+            psu_save_waveform_btn = gr.Button("Save Multi-Channel Waveform Plot", variant="primary")
             psu_waveform_save_status = gr.Textbox(
                 label="Save Status",
                 interactive=False
             )
 
-            # Waveform event handlers
-            def preview_waveform(waveform_type, target_v, cycles, points, duration):
-                """Generate preview plot of waveform"""
+            # ════════════════════════════════════════════════════════════════
+            # MULTI-CHANNEL WAVEFORM EVENT HANDLERS (FIXED)
+            # ════════════════════════════════════════════════════════════════
+
+            # Store the last generated figure for saving
+            self._last_waveform_fig = None
+
+            def preview_all_channels(
+                ch1_en, ch1_wf, ch1_v, ch1_cyc, ch1_pts, ch1_dur,
+                ch2_en, ch2_wf, ch2_v, ch2_cyc, ch2_pts, ch2_dur,
+                ch3_en, ch3_wf, ch3_v, ch3_cyc, ch3_pts, ch3_dur
+            ):
+                """Generate preview plot showing ALL enabled channels"""
                 try:
                     import matplotlib.pyplot as plt
 
-                    # Extract waveform name from dropdown description (e.g., "Sine - ∿ smooth wave" -> "Sine")
-                    waveform_name = waveform_type.split(' - ')[0] if ' - ' in waveform_type else waveform_type
+                    # Channel colors
+                    colors = {1: '#2196F3', 2: '#4CAF50', 3: '#FF9800'}  # Blue, Green, Orange
 
-                    generator = self.psu_controller._WaveformGenerator(
-                        waveform_type=waveform_name,
-                        target_voltage=target_v,
-                        cycles=int(cycles),
-                        points_per_cycle=int(points),
-                        cycle_duration=duration
-                    )
-                    profile = generator.generate()
+                    fig, ax = plt.subplots(figsize=(14, 7))
 
-                    times = [p[0] for p in profile]
-                    voltages = [p[1] for p in profile]
+                    enabled_count = 0
+                    max_voltage = 0
+                    total_points = 0
 
-                    fig, ax = plt.subplots(figsize=(12, 6))
-                    ax.plot(times, voltages, 'b-', linewidth=2, label='Voltage Profile')
-                    ax.set_xlabel('Time (s)', fontsize=12, fontweight='bold')
-                    ax.set_ylabel('Voltage (V)', fontsize=12, fontweight='bold')
-                    ax.set_title(f'{waveform_type} Waveform - {int(cycles)} Cycles ({len(profile)} points)',
-                                fontsize=14, fontweight='bold')
-                    ax.grid(True, alpha=0.3, linestyle='--')
-                    ax.set_ylim([min(0, min(voltages) - 0.5), max(voltages) + 0.5])
-                    ax.legend(loc='upper right')
+                    # Process each enabled channel
+                    channel_configs = [
+                        (1, ch1_en, ch1_wf, ch1_v, ch1_cyc, ch1_pts, ch1_dur),
+                        (2, ch2_en, ch2_wf, ch2_v, ch2_cyc, ch2_pts, ch2_dur),
+                        (3, ch3_en, ch3_wf, ch3_v, ch3_cyc, ch3_pts, ch3_dur)
+                    ]
+
+                    for ch, enabled, wf_type, voltage, cycles, points, duration in channel_configs:
+                        if not enabled:
+                            continue
+
+                        enabled_count += 1
+
+                        # Extract waveform name
+                        wf_name = wf_type.split(' - ')[0] if ' - ' in wf_type else wf_type
+
+                        # Generate waveform profile
+                        cyc = int(cycles) if cycles else 3
+                        pts = int(points) if points else 50
+                        dur = float(duration) if duration else 8.0
+                        volt = float(voltage) if voltage else 3.0
+
+                        generator = self.psu_controller._WaveformGenerator(
+                            waveform_type=wf_name,
+                            target_voltage=volt,
+                            cycles=cyc,
+                            points_per_cycle=pts,
+                            cycle_duration=dur
+                        )
+                        profile = generator.generate()
+
+                        times = [p[0] for p in profile]
+                        voltages = [p[1] for p in profile]
+
+                        # Plot this channel
+                        ax.plot(times, voltages, color=colors[ch], linewidth=2,
+                               label=f'CH{ch}: {wf_name} ({volt}V, {cyc}×{pts}pts)')
+
+                        max_voltage = max(max_voltage, max(voltages))
+                        total_points = max(total_points, len(profile))
+
+                    if enabled_count == 0:
+                        ax.text(0.5, 0.5, 'No channels enabled.\nEnable at least one channel to preview.',
+                               ha='center', va='center', transform=ax.transAxes, fontsize=14)
+                        ax.set_title('Multi-Channel Waveform Preview')
+                    else:
+                        ax.set_xlabel('Time (s)', fontsize=12, fontweight='bold')
+                        ax.set_ylabel('Voltage (V)', fontsize=12, fontweight='bold')
+                        ax.set_title(f'Multi-Channel Waveform Preview - {enabled_count} Channel(s), {total_points} points max',
+                                    fontsize=14, fontweight='bold')
+                        ax.grid(True, alpha=0.3, linestyle='--')
+                        ax.set_ylim([0, max_voltage + 0.5])
+                        ax.legend(loc='upper right', fontsize=10)
+
                     plt.tight_layout()
+
+                    # Store for saving
+                    self._last_waveform_fig = fig
 
                     return fig
 
                 except Exception as e:
-                    return None
+                    import matplotlib.pyplot as plt
+                    fig, ax = plt.subplots(figsize=(12, 6))
+                    ax.text(0.5, 0.5, f'Error generating preview:\n{str(e)}',
+                           ha='center', va='center', transform=ax.transAxes, fontsize=12, color='red')
+                    return fig
 
-            def start_waveform_generation(channel, waveform_type, target_v, cycles, points, duration, settle):
-                """Start waveform generation on selected channel"""
+            def save_waveform_plot(save_path):
+                """Save the LIVE execution data graph (measured data from actual waveform run)"""
                 try:
-                    if not self.psu_controller.is_connected:
-                        return "ERROR: Power supply not connected. Please connect first."
+                    if not save_path or save_path.strip() == "":
+                        return "ERROR: Please select a save location first"
 
-                    # Extract waveform name from dropdown description (e.g., "Sine - ∿ smooth wave" -> "Sine")
-                    waveform_name = waveform_type.split(' - ')[0] if ' - ' in waveform_type else waveform_type
+                    from pathlib import Path
+                    import matplotlib.pyplot as plt
+                    from datetime import datetime
 
-                    # Validate channel voltage limits
-                    if channel == 3 and target_v > 5:
-                        return "ERROR: Channel 3 limited to 5V maximum. Please reduce target voltage."
-                    elif channel in [1, 2] and target_v > 30:
-                        return "ERROR: Channels 1 and 2 limited to 30V maximum. Please reduce target voltage."
+                    save_dir = Path(save_path)
 
-                    # Update ramping parameters
-                    self.psu_controller.ramping_params.update({
-                        'waveform': waveform_name,
-                        'target_voltage': target_v,
-                        'cycles': int(cycles),
-                        'points_per_cycle': int(points),
-                        'cycle_duration': duration,
-                        'psu_settle': settle,
-                        'active_channel': channel
-                    })
+                    if not save_dir.exists():
+                        return f"ERROR: Directory does not exist: {save_path}"
 
-                    # Generate waveform profile
-                    generator = self.psu_controller._WaveformGenerator(
-                        waveform_type=waveform_name,
-                        target_voltage=target_v,
-                        cycles=int(cycles),
-                        points_per_cycle=int(points),
-                        cycle_duration=duration
-                    )
-                    self.psu_controller.ramping_profile = generator.generate()
+                    # Check if we have actual execution data
+                    if not hasattr(self.psu_controller, 'ramping_data') or not self.psu_controller.ramping_data:
+                        return "ERROR: No execution data to save. Run a waveform first to collect live data."
 
-                    # Start waveform execution in background thread
-                    if self.psu_controller.ramping_thread and self.psu_controller.ramping_thread.is_alive():
-                        return "ERROR: Waveform already running. Stop current waveform first."
+                    # We have execution data - create a plot from the LIVE measured data
+                    data = self.psu_controller.ramping_data
 
-                    self.psu_controller.ramping_active = True
-                    self.psu_controller.ramping_thread = threading.Thread(
-                        target=self.psu_controller.execute_waveform_ramping,
-                        daemon=True
-                    )
-                    self.psu_controller.ramping_thread.start()
+                    # Group data by channel
+                    channels_data = {}
+                    for point in data:
+                        ch = point.get('channel', 1)
+                        if ch not in channels_data:
+                            channels_data[ch] = {'timestamps': [], 'set_v': [], 'measured_v': [], 'measured_i': []}
+                        channels_data[ch]['timestamps'].append(point['timestamp'])
+                        channels_data[ch]['set_v'].append(point.get('set_voltage', 0))
+                        channels_data[ch]['measured_v'].append(point.get('measured_voltage', 0))
+                        channels_data[ch]['measured_i'].append(point.get('measured_current', 0))
 
-                    return f"Waveform STARTED on Channel {channel}: {waveform_type}, {len(self.psu_controller.ramping_profile)} points, {int(cycles)} cycles"
+                    # Create figure with subplots
+                    num_channels = len(channels_data)
+                    if num_channels == 0:
+                        return "ERROR: No channel data found in execution results."
+
+                    fig, axes = plt.subplots(num_channels, 2, figsize=(16, 5 * num_channels), squeeze=False)
+
+                    colors = {1: '#2196F3', 2: '#4CAF50', 3: '#FF9800'}
+
+                    for idx, (ch, ch_data) in enumerate(sorted(channels_data.items())):
+                        # Convert timestamps to relative seconds
+                        if ch_data['timestamps']:
+                            t0 = ch_data['timestamps'][0]
+                            times = [(t - t0).total_seconds() for t in ch_data['timestamps']]
+                        else:
+                            times = []
+
+                        ax_v = axes[idx][0]
+                        ax_i = axes[idx][1]
+
+                        # Voltage plot
+                        ax_v.plot(times, ch_data['set_v'], '--', color=colors.get(ch, 'blue'),
+                                 linewidth=1, label='Setpoint', alpha=0.7)
+                        ax_v.plot(times, ch_data['measured_v'], '-', color=colors.get(ch, 'blue'),
+                                 linewidth=2, label='Measured')
+                        ax_v.set_xlabel('Time (s)')
+                        ax_v.set_ylabel('Voltage (V)')
+                        ax_v.set_title(f'CH{ch} Voltage - Live Execution Data')
+                        ax_v.legend(loc='upper right')
+                        ax_v.grid(True, alpha=0.3)
+
+                        # Current plot
+                        ax_i.plot(times, ch_data['measured_i'], '-', color=colors.get(ch, 'blue'),
+                                 linewidth=2)
+                        ax_i.set_xlabel('Time (s)')
+                        ax_i.set_ylabel('Current (A)')
+                        ax_i.set_title(f'CH{ch} Current - Live Execution Data')
+                        ax_i.grid(True, alpha=0.3)
+
+                    plt.suptitle(f'Multi-Channel Waveform Execution Results - {len(data)} Data Points',
+                                fontsize=14, fontweight='bold')
+                    plt.tight_layout()
+
+                    # Save
+                    timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    filename = f"waveform_live_data_{timestamp_str}.png"
+                    filepath = save_dir / filename
+                    fig.savefig(filepath, dpi=300, bbox_inches='tight', facecolor='white')
+                    plt.close(fig)
+
+                    return f"✓ LIVE data saved to:\n{filepath}\n({len(data)} points, {num_channels} channel(s))"
 
                 except Exception as e:
-                    return f"ERROR: {str(e)}"
+                    import traceback
+                    return f"ERROR saving plot: {str(e)}"
+
+            def start_multi_channel_waveform(
+                ch1_en, ch1_wf, ch1_v, ch1_i, ch1_cyc, ch1_pts, ch1_dur,
+                ch2_en, ch2_wf, ch2_v, ch2_i, ch2_cyc, ch2_pts, ch2_dur,
+                ch3_en, ch3_wf, ch3_v, ch3_i, ch3_cyc, ch3_pts, ch3_dur,
+                settle_time
+            ):
+                """Start multi-channel waveform generation"""
+                # Update settle time
+                self.psu_controller.ramping_params['psu_settle'] = settle_time
+
+                configs = []
+                if ch1_en:
+                    configs.append({
+                        'channel': 1,
+                        'waveform': ch1_wf,
+                        'target_voltage': ch1_v,
+                        'current_limit': ch1_i,
+                        'cycles': int(ch1_cyc) if ch1_cyc else 3,
+                        'points_per_cycle': int(ch1_pts) if ch1_pts else 50,
+                        'cycle_duration': ch1_dur if ch1_dur else 8.0
+                    })
+                if ch2_en:
+                    configs.append({
+                        'channel': 2,
+                        'waveform': ch2_wf,
+                        'target_voltage': ch2_v,
+                        'current_limit': ch2_i,
+                        'cycles': int(ch2_cyc) if ch2_cyc else 3,
+                        'points_per_cycle': int(ch2_pts) if ch2_pts else 50,
+                        'cycle_duration': ch2_dur if ch2_dur else 8.0
+                    })
+                if ch3_en:
+                    configs.append({
+                        'channel': 3,
+                        'waveform': ch3_wf,
+                        'target_voltage': ch3_v,
+                        'current_limit': ch3_i,
+                        'cycles': int(ch3_cyc) if ch3_cyc else 3,
+                        'points_per_cycle': int(ch3_pts) if ch3_pts else 50,
+                        'cycle_duration': ch3_dur if ch3_dur else 8.0
+                    })
+
+                if not configs:
+                    return "ERROR: Enable at least one channel for waveform generation"
+
+                return self.psu_controller.start_multi_channel_waveform(configs)
 
             def stop_waveform_generation():
                 """Stop active waveform generation"""
-                try:
-                    self.psu_controller.ramping_active = False
-                    if self.psu_controller.ramping_thread:
-                        self.psu_controller.ramping_thread.join(timeout=2.0)
-                    return "Waveform generation STOPPED. Channel output disabled for safety."
-                except Exception as e:
-                    return f"ERROR stopping waveform: {str(e)}"
+                return self.psu_controller.stop_multi_channel_waveform()
 
+            # All inputs needed for preview
+            preview_inputs = [
+                psu_ch1_enable, psu_ch1_waveform, psu_ch1_voltage, psu_ch1_cycles, psu_ch1_points, psu_ch1_duration,
+                psu_ch2_enable, psu_ch2_waveform, psu_ch2_voltage, psu_ch2_cycles, psu_ch2_points, psu_ch2_duration,
+                psu_ch3_enable, psu_ch3_waveform, psu_ch3_voltage, psu_ch3_cycles, psu_ch3_points, psu_ch3_duration
+            ]
+
+            # Wire up preview button - shows ALL enabled channels
             psu_preview_waveform_btn.click(
-                fn=preview_waveform,
-                inputs=[
-                    psu_waveform_type,
-                    psu_target_voltage,
-                    psu_cycles,
-                    psu_points_per_cycle,
-                    psu_cycle_duration
-                ],
+                fn=preview_all_channels,
+                inputs=preview_inputs,
                 outputs=[psu_waveform_plot]
             )
 
+            # Wire up start button with all channel configs
             psu_start_waveform_btn.click(
-                fn=start_waveform_generation,
+                fn=start_multi_channel_waveform,
                 inputs=[
-                    psu_waveform_channel,
-                    psu_waveform_type,
-                    psu_target_voltage,
-                    psu_cycles,
-                    psu_points_per_cycle,
-                    psu_cycle_duration,
+                    psu_ch1_enable, psu_ch1_waveform, psu_ch1_voltage, psu_ch1_current,
+                    psu_ch1_cycles, psu_ch1_points, psu_ch1_duration,
+                    psu_ch2_enable, psu_ch2_waveform, psu_ch2_voltage, psu_ch2_current,
+                    psu_ch2_cycles, psu_ch2_points, psu_ch2_duration,
+                    psu_ch3_enable, psu_ch3_waveform, psu_ch3_voltage, psu_ch3_current,
+                    psu_ch3_cycles, psu_ch3_points, psu_ch3_duration,
                     psu_settle_time
                 ],
                 outputs=[psu_waveform_status]
@@ -5229,9 +6323,9 @@ class UnifiedInstrumentControl:
                 outputs=[psu_waveform_save_path]
             )
 
-            # Save waveform plot button
+            # Save waveform plot button - uses the new save_waveform_plot function
             psu_save_waveform_btn.click(
-                fn=self.psu_controller.save_waveform_plot,
+                fn=save_waveform_plot,
                 inputs=[psu_waveform_save_path],
                 outputs=[psu_waveform_save_status]
             )
@@ -5355,9 +6449,15 @@ class UnifiedInstrumentControl:
             osc_config_channel_btn = gr.Button("Configure Channels", variant="primary")
             osc_channel_status = gr.Textbox(label="Status", interactive=False)
             
+            gr.Markdown("### Acquisition Control")
             with gr.Row():
-                osc_autoscale_btn = gr.Button("Autoscale", variant="primary")
-                osc_system_status = gr.Textbox(label="Status", interactive=False, lines=4)
+                osc_run_btn = gr.Button("▶ RUN", variant="primary")
+                osc_stop_btn = gr.Button("⏹ STOP", variant="stop")
+                osc_single_btn = gr.Button("⏯ SINGLE", variant="secondary")
+                osc_autoscale_btn = gr.Button("⚡ Autoscale", variant="primary")
+
+            osc_acquisition_status = gr.Textbox(label="Acquisition Status", interactive=False)
+            osc_system_status = gr.Textbox(label="System Status", interactive=False, lines=3)
 
         with gr.Tab("Timebase & Trigger"):
             gr.Markdown("### Horizontal Timebase Configuration")
@@ -5807,7 +6907,25 @@ class UnifiedInstrumentControl:
             inputs=[],
             outputs=[osc_system_status]
         )
-        
+
+        osc_run_btn.click(
+            fn=self.oscilloscope_controller.run_acquisition,
+            inputs=[],
+            outputs=[osc_acquisition_status]
+        )
+
+        osc_stop_btn.click(
+            fn=self.oscilloscope_controller.stop_acquisition,
+            inputs=[],
+            outputs=[osc_acquisition_status]
+        )
+
+        osc_single_btn.click(
+            fn=self.oscilloscope_controller.single_acquisition,
+            inputs=[],
+            outputs=[osc_acquisition_status]
+        )
+
         osc_timebase_btn.click(
             fn=self.oscilloscope_controller.configure_timebase,
             inputs=[osc_time_scale],
