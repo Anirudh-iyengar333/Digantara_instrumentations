@@ -38,7 +38,7 @@ Before you begin, make sure you have:
 
 ## Windows Installation
 
-### Step 1: Install Python
+### Step 1: Install Python v 3.12 (prefered)
 
 #### Option A: Using Microsoft Store (Easiest - Windows 10/11)
 
