@@ -6,11 +6,11 @@ A comprehensive, enterprise-grade Python library for controlling laboratory
 and test equipment with precision and reliability.
 
 Author: Professional Instrument Control Team
-Version: 1.0.0
+Version: 1.0.1
 License: MIT
 """
 
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 __author__ = "Professional Instrument Control Team"
 __email__ = "support@example.com"
 __license__ = "MIT"
@@ -67,7 +67,7 @@ LIBRARY_INFO = {
             "Keithley DMM7510"
         ],
         "oscilloscopes": [
-            "Keysight DSOX6000 Series",
+            "Keysight DSOX6000 Series (DSOX6004A)",
             "Tektronix MSO2 Series (MSO24)"
         ]
     }
@@ -137,7 +137,7 @@ def check_dependencies() -> dict:
         }
 
     # Check optional dependencies
-    optional_deps = ['scipy', 'matplotlib', 'pandas']
+    optional_deps = ['scipy', 'matplotlib', 'pandas', 'gradio']
     for dep in optional_deps:
         try:
             module = __import__(dep)
@@ -154,3 +154,140 @@ def check_dependencies() -> dict:
             }
 
     return dependencies
+
+
+def get_oscilloscope_comparison() -> dict:
+    """
+    Get comparison between supported oscilloscope models.
+    
+    Returns:
+        Dictionary comparing oscilloscope specifications and capabilities
+    """
+    return {
+        "keysight_dsox6004a": {
+            "manufacturer": "Keysight Technologies",
+            "model": "DSOX6004A",
+            "bandwidth": "1 GHz",
+            "channels": 4,
+            "sample_rate": "20 GS/s",
+            "memory_depth": "16 Mpts",
+            "function_generators": 2,
+            "digital_channels": 0,
+            "key_features": [
+                "High bandwidth (1 GHz)",
+                "Dual function generators",
+                "Advanced trigger modes",
+                "Math functions",
+                "High sample rate"
+            ]
+        },
+        "tektronix_mso24": {
+            "manufacturer": "Tektronix",
+            "model": "MSO24",
+            "bandwidth": "200 MHz",
+            "channels": 4,
+            "sample_rate": "2.5 GS/s", 
+            "memory_depth": "62.5 Mpts",
+            "function_generators": 1,
+            "digital_channels": 16,
+            "key_features": [
+                "Mixed signal capability (16 digital channels)",
+                "Large memory depth (62.5 Mpts)",
+                "Built-in AFG",
+                "Comprehensive measurement suite",
+                "Professional test automation"
+            ]
+        }
+    }
+
+
+def get_recommended_usage() -> dict:
+    """
+    Get recommended usage scenarios for each oscilloscope.
+    
+    Returns:
+        Dictionary with recommended applications for each model
+    """
+    return {
+        "keysight_dsox6004a": [
+            "High-frequency signal analysis (up to 1 GHz)",
+            "RF and microwave applications",
+            "High-speed digital signal validation",
+            "Advanced signal generation requirements",
+            "Applications requiring maximum bandwidth"
+        ],
+        "tektronix_mso24": [
+            "Mixed signal debugging (analog + digital)",
+            "Embedded system development", 
+            "Long duration signal capture",
+            "Educational and training applications",
+            "Cost-effective professional testing",
+            "Applications with moderate bandwidth requirements"
+        ]
+    }
+
+
+# Convenience function for quick instrument selection
+def create_oscilloscope(model: str, visa_address: str, **kwargs):
+    """
+    Factory function to create oscilloscope instances.
+    
+    Args:
+        model: Oscilloscope model ("keysight_dsox6004a" or "tektronix_mso24")
+        visa_address: VISA address for the instrument
+        **kwargs: Additional arguments passed to the constructor
+        
+    Returns:
+        Oscilloscope instance
+        
+    Raises:
+        ValueError: If model is not supported
+    """
+    model = model.lower().replace("-", "_").replace(" ", "_")
+    
+    if model in ["keysight_dsox6004a", "dsox6004a", "keysight"]:
+        return KeysightDSOX6004A(visa_address, **kwargs)
+    elif model in ["tektronix_mso24", "mso24", "tektronix"]:
+        return TektronixMSO24(visa_address, **kwargs)
+    else:
+        raise ValueError(f"Unsupported oscilloscope model: {model}. "
+                        f"Supported models: keysight_dsox6004a, tektronix_mso24")
+
+
+# Professional instrument control best practices
+BEST_PRACTICES = {
+    "connection_management": [
+        "Always use try-catch blocks for VISA operations",
+        "Implement proper timeout management for long operations",
+        "Use context managers or ensure proper disconnect() calls",
+        "Verify instrument identification after connection"
+    ],
+    "measurement_automation": [
+        "Configure channels before starting measurements",
+        "Use appropriate trigger settings for stable acquisition",
+        "Implement error checking for measurement validity",
+        "Save configuration state for reproducible results"
+    ],
+    "data_handling": [
+        "Use professional file naming conventions with timestamps",
+        "Implement proper data validation and error checking",
+        "Provide comprehensive metadata with exported data",
+        "Use appropriate data formats (CSV, binary) for the application"
+    ],
+    "thread_safety": [
+        "Use locks for multi-threaded instrument access",
+        "Implement proper exception handling in threads",
+        "Avoid simultaneous SCPI commands to the same instrument",
+        "Use queues for data sharing between threads"
+    ]
+}
+
+
+def get_best_practices() -> dict:
+    """
+    Get professional instrument control best practices.
+    
+    Returns:
+        Dictionary containing best practice guidelines
+    """
+    return BEST_PRACTICES.copy()
