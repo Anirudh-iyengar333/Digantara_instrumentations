@@ -246,21 +246,33 @@ class TektronixMSO24:
 
         try:
             if trigger_type == "EDGE":
-                # Batch all EDGE trigger commands
-                commands = (
-                    f"TRIGger:A:TYPe {trigger_type};"
-                    f"TRIGger:A:EDGE:SOUrce {source};"
-                    f"TRIGger:A:EDGE:SLOpe {slope};"
-                    f"TRIGger:A:EDGE:COUPling {coupling};"
-                    f"TRIGger:A:LEVel:{source} {level}"
-                )
+                # Send each trigger command individually with delays
+                self._scpi_wrapper.write(f"TRIGger:A:TYPe {trigger_type}")
+                time.sleep(0.05)
+
+                self._scpi_wrapper.write(f"TRIGger:A:EDGE:SOUrce {source}")
+                time.sleep(0.05)
+
+                self._scpi_wrapper.write(f"TRIGger:A:EDGE:SLOpe {slope}")
+                time.sleep(0.05)
+
+                self._scpi_wrapper.write(f"TRIGger:A:EDGE:COUPling {coupling}")
+                time.sleep(0.05)
+
+                self._scpi_wrapper.write(f"TRIGger:A:LEVel:{source} {level}")
+                time.sleep(0.1)  # Longer delay for level to take effect
+
+                # Verify settings were applied
+                actual_source = self._scpi_wrapper.query("TRIGger:A:EDGE:SOUrce?").strip()
+                actual_slope = self._scpi_wrapper.query("TRIGger:A:EDGE:SLOpe?").strip()
+                actual_level = float(self._scpi_wrapper.query(f"TRIGger:A:LEVel:{source}?").strip())
+
+                self._logger.info(f"Trigger set: {trigger_type}, {source}, {level}V, {slope}")
+                self._logger.info(f"Trigger verified: {actual_source}, {actual_slope}, {actual_level}V")
             else:
-                commands = f"TRIGger:A:TYPe {trigger_type}"
+                self._scpi_wrapper.write(f"TRIGger:A:TYPe {trigger_type}")
+                time.sleep(0.1)
 
-            self._scpi_wrapper.write(commands)
-            time.sleep(SCPI_BATCH_DELAY)
-
-            self._logger.info(f"Trigger: {trigger_type}, {source}, {level}V, {slope}")
             return True
         except Exception as e:
             self._logger.error(f"Failed to configure trigger: {e}")
