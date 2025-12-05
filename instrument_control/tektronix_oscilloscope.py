@@ -150,8 +150,7 @@ class TektronixMSO24:
             return None
 
     def configure_channel(self, channel: int, vertical_scale: float, vertical_offset: float = 0.0,
-                          coupling: str = "DC", probe_attenuation: float = 1.0,
-                          bandwidth_limit: bool = False) -> bool:
+                          coupling: str = "DC", bandwidth_limit: bool = False) -> bool:
         """Configure vertical parameters for specified channel.
 
         Args:
@@ -159,8 +158,10 @@ class TektronixMSO24:
             vertical_scale: Vertical scale in volts per division
             vertical_offset: Vertical offset in volts
             coupling: Input coupling ("DC", "AC", "DCREJECT")
-            probe_attenuation: Probe attenuation factor
             bandwidth_limit: Enable 20MHz bandwidth limit
+
+        Note:
+            Probe attenuation should be set separately using set_probe_attenuation()
         """
         if not self.is_connected:
             raise TektronixMSO24Error("Oscilloscope not connected")
@@ -172,23 +173,56 @@ class TektronixMSO24:
         try:
             bw_setting = "TWENty" if bandwidth_limit else "FULl"
 
-            # Batch all channel configuration commands into a single write (reduces latency by 250ms!)
-            commands = (
-                f"DISplay:GLObal:CH{channel}:STATE ON;"
-                f"CH{channel}:SCAle {vertical_scale};"
-                f"CH{channel}:OFFSet {vertical_offset};"
-                f"CH{channel}:COUPling {coupling};"
-                f"CH{channel}:PROBEFunc:EXTAtten {probe_attenuation};"
-                f"CH{channel}:BANdwidth {bw_setting}"
-            )
-            self._scpi_wrapper.write(commands)
-            time.sleep(SCPI_BATCH_DELAY)
+            # Send each command individually with delays to ensure they are applied
+            self._scpi_wrapper.write(f"DISplay:GLObal:CH{channel}:STATE ON")
+            time.sleep(0.05)
+
+            self._scpi_wrapper.write(f"CH{channel}:SCAle {vertical_scale}")
+            time.sleep(0.05)
+
+            self._scpi_wrapper.write(f"CH{channel}:OFFSet {vertical_offset}")
+            time.sleep(0.05)
+
+            self._scpi_wrapper.write(f"CH{channel}:COUPling {coupling}")
+            time.sleep(0.05)
+
+            self._scpi_wrapper.write(f"CH{channel}:BANdwidth {bw_setting}")
+            time.sleep(0.05)
 
             self._logger.info(f"CH{channel}: {vertical_scale}V/div, {vertical_offset}V offset, "
-                            f"{coupling}, {probe_attenuation}x, BW={bw_setting}")
+                            f"{coupling}, BW={bw_setting}")
             return True
         except Exception as e:
             self._logger.error(f"Failed to configure channel {channel}: {e}")
+            return False
+
+    def set_probe_attenuation(self, channel: int, attenuation: float) -> bool:
+        """Set probe attenuation independently for a specific channel.
+
+        Args:
+            channel: Channel number (1-4)
+            attenuation: Probe attenuation factor (e.g., 1.0, 10.0, 100.0)
+
+        Returns:
+            True if successful, False otherwise
+        """
+        if not self.is_connected:
+            raise TektronixMSO24Error("Oscilloscope not connected")
+        if not (1 <= channel <= self.MAX_CHANNELS):
+            raise ValueError(f"Channel must be 1-{self.MAX_CHANNELS}, got {channel}")
+
+        try:
+            # Set probe attenuation
+            self._scpi_wrapper.write(f"CH{channel}:PROBEFunc:EXTAtten {attenuation}")
+            time.sleep(0.1)  # Allow time for setting to take effect
+
+            # Verify the setting was applied
+            actual_atten = float(self._scpi_wrapper.query(f"CH{channel}:PROBEFunc:EXTAtten?").strip())
+
+            self._logger.info(f"CH{channel}: Probe attenuation set to {attenuation}x (verified: {actual_atten}x)")
+            return True
+        except Exception as e:
+            self._logger.error(f"Failed to set probe attenuation for CH{channel}: {e}")
             return False
 
     def configure_timebase(self, time_scale: float, time_position: float = 0.0,
@@ -1007,12 +1041,22 @@ class TektronixMSO24:
             self._logger.error(f"Failed to set output directories: {e}")
             return False
 
-    # ============================================================================
-    # 📋 QUERY FUNCTIONS - For debugging and verification
-    # ============================================================================
-
     def get_channel_config(self, channel: int) -> Optional[Dict[str, Any]]:
-        """Query channel configuration"""
+        """
+        Query channel configuration including probe settings
+        
+        Returns:
+            Dictionary containing channel configuration with the following keys:
+            - channel: Channel number (1-4)
+            - scale: Vertical scale in volts/div
+            - offset: Vertical offset in volts
+            - coupling: Input coupling (AC, DC, GND)
+            - probe_attenuation: Probe attenuation factor (e.g., 10.0 for 10x probe)
+            - probe_attenuation_db: Probe attenuation in decibels
+            - probe_units: Probe units ('V' for Volts or 'A' for Amps)
+            - bandwidth: Bandwidth limit setting
+            - display: Whether channel is displayed (0 or 1)
+        """
         if not self.is_connected:
             return None
         if not (1 <= channel <= self.MAX_CHANNELS):
@@ -1024,7 +1068,9 @@ class TektronixMSO24:
                 'scale': float(self._scpi_wrapper.query(f"CH{channel}:SCAle?").strip()),
                 'offset': float(self._scpi_wrapper.query(f"CH{channel}:OFFSet?").strip()),
                 'coupling': self._scpi_wrapper.query(f"CH{channel}:COUPling?").strip(),
-                'probe': float(self._scpi_wrapper.query(f"CH{channel}:PROBEFunc:EXTAtten?").strip()),
+                'probe_attenuation': float(self._scpi_wrapper.query(f"CH{channel}:PROBEFunc:EXTAtten?").strip()),
+                'probe_attenuation_db': float(self._scpi_wrapper.query(f"CH{channel}:PROBEFunc:EXTDBatten?").strip()),
+                'probe_units': self._scpi_wrapper.query(f'CH{channel}:PROBEFunc:EXTUnits?').strip('" \n'),
                 'bandwidth': self._scpi_wrapper.query(f"CH{channel}:BANdwidth?").strip(),
                 'display': self._scpi_wrapper.query(f"DISplay:GLObal:CH{channel}:STATE?").strip()
             }

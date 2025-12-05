@@ -1000,30 +1000,13 @@ class GradioMSO24GUI:
                             vertical_scale=scale,
                             vertical_offset=offset,
                             coupling=coupling,
-                            probe_attenuation=probe_value,
                             bandwidth_limit=False
                         )
-
-                        # Read back effective probe attenuation from instrument for accuracy
-                        effective_probe = probe_value
-                        if success:
-                            try:
-                                ch_config = self.oscilloscope.get_channel_config(channel)
-                                if ch_config and 'probe' in ch_config:
-                                    effective_probe = ch_config['probe']
-                                    self._logger.info(
-                                        f"Channel {channel} probe check: requested {probe_value}x, "
-                                        f"instrument reports {effective_probe}x"
-                                    )
-                            except Exception as cfg_err:
-                                self._logger.warning(
-                                    f"Could not read back channel {channel} probe setting: {cfg_err}"
-                                )
 
                         status = "configured" if success else "config failed"
                         results.append(
                             f"CH{channel}: enabled, {status} "
-                            f"(Scale={scale} V/div, Offset={offset} V, Coupling={coupling}, Probe={effective_probe}x)"
+                            f"(Scale={scale} V/div, Offset={offset} V, Coupling={coupling})"
                         )
                     else:
                         results.append(f"CH{channel}: disabled")
@@ -1033,6 +1016,31 @@ class GradioMSO24GUI:
         except Exception as e:
             self._logger.error(f"Channel config error: {e}")
             return f"[ERROR] Channel config: {str(e)}"
+
+    def set_probe_attenuation(self, channel: int, attenuation: float) -> str:
+        """Set probe attenuation for a specific channel"""
+        if not self.is_connected:
+            return "[ERROR] Oscilloscope not connected"
+
+        try:
+            # Convert string probe values to float
+            if isinstance(attenuation, str):
+                probe_map = {"1x": 1.0, "10x": 10.0, "100x": 100.0, "1000x": 1000.0}
+                probe_value = probe_map.get(attenuation, float(attenuation.replace('x', '')))
+            else:
+                probe_value = float(attenuation)
+
+            with self.io_lock:
+                success = self.oscilloscope.set_probe_attenuation(channel, probe_value)
+
+            if success:
+                return f"[OK] CH{channel}: Probe attenuation set to {probe_value}x"
+            else:
+                return f"[ERROR] Failed to set probe attenuation for CH{channel}"
+
+        except Exception as e:
+            self._logger.error(f"Probe config error: {e}")
+            return f"[ERROR] Probe config: {str(e)}"
 
     def configure_timebase(self, time_scale: float, position: float, record_length: int) -> str:
         """Configure horizontal timebase"""
@@ -2032,6 +2040,69 @@ class GradioMSO24GUI:
                     fn=self.configure_channels,
                     inputs=[ch1_select, ch2_select, ch3_select, ch4_select, v_scale, v_offset, coupling, probe],
                     outputs=[channel_status]
+                )
+
+                gr.Markdown("---")
+                gr.Markdown("### Probe Configuration (Independent)")
+                gr.Markdown("*Set probe attenuation for each channel independently*")
+
+                with gr.Row():
+                    probe_ch1 = gr.Dropdown(
+                        label="CH1 Probe",
+                        choices=["1x", "10x", "100x", "1000x"],
+                        value="10x"
+                    )
+                    probe_ch1_btn = gr.Button("Set CH1", variant="secondary", scale=0.5)
+
+                with gr.Row():
+                    probe_ch2 = gr.Dropdown(
+                        label="CH2 Probe",
+                        choices=["1x", "10x", "100x", "1000x"],
+                        value="1x"
+                    )
+                    probe_ch2_btn = gr.Button("Set CH2", variant="secondary", scale=0.5)
+
+                with gr.Row():
+                    probe_ch3 = gr.Dropdown(
+                        label="CH3 Probe",
+                        choices=["1x", "10x", "100x", "1000x"],
+                        value="10x"
+                    )
+                    probe_ch3_btn = gr.Button("Set CH3", variant="secondary", scale=0.5)
+
+                with gr.Row():
+                    probe_ch4 = gr.Dropdown(
+                        label="CH4 Probe",
+                        choices=["1x", "10x", "100x", "1000x"],
+                        value="10x"
+                    )
+                    probe_ch4_btn = gr.Button("Set CH4", variant="secondary", scale=0.5)
+
+                probe_status = gr.Textbox(label="Probe Status", interactive=False, lines=3)
+
+                # Connect probe buttons
+                probe_ch1_btn.click(
+                    fn=lambda p: self.set_probe_attenuation(1, p),
+                    inputs=[probe_ch1],
+                    outputs=[probe_status]
+                )
+
+                probe_ch2_btn.click(
+                    fn=lambda p: self.set_probe_attenuation(2, p),
+                    inputs=[probe_ch2],
+                    outputs=[probe_status]
+                )
+
+                probe_ch3_btn.click(
+                    fn=lambda p: self.set_probe_attenuation(3, p),
+                    inputs=[probe_ch3],
+                    outputs=[probe_status]
+                )
+
+                probe_ch4_btn.click(
+                    fn=lambda p: self.set_probe_attenuation(4, p),
+                    inputs=[probe_ch4],
+                    outputs=[probe_status]
                 )
 
                 gr.Markdown("---")
