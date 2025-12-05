@@ -517,7 +517,8 @@ class TektronixMSO24:
             return False
         try:
             state = "ON" if display else "OFF"
-            self._scpi_wrapper.write(f"DISplay:GLObal:MATH{function_num}:STATE {state}")
+            self._scpi_wrapper.write(f"DISplay:WAVEView1:MATH:MATH{function_num}:STATE {state}")
+            time.sleep(0.1)
             self._logger.info(f"Math{function_num} display: {state}")
             return True
         except Exception as e:
@@ -529,11 +530,35 @@ class TektronixMSO24:
         if not self.is_connected:
             return False
         try:
-            self._scpi_wrapper.write(f"MATH:MATH{function_num}:VERTical:SCAle {scale}")
-            self._logger.info(f"Math{function_num} scale: {scale} V/div")
+            # First, disable autoscale so manual scale setting takes effect
+            self._scpi_wrapper.write(f"DISplay:WAVEView1:MATH:MATH{function_num}:AUTOScale OFF")
+            time.sleep(0.05)
+
+            # Now set the manual scale
+            self._scpi_wrapper.write(f"DISplay:WAVEView1:MATH:MATH{function_num}:VERTical:SCAle {scale}")
+            time.sleep(0.1)  # Allow time for setting to take effect
+
+            # Verify the setting
+            actual_scale = self._scpi_wrapper.query(f"DISplay:WAVEView1:MATH:MATH{function_num}:VERTical:SCAle?").strip()
+
+            self._logger.info(f"Math{function_num} autoscale disabled, scale set to: {scale} V/div (verified: {actual_scale} V/div)")
             return True
         except Exception as e:
             self._logger.error(f"Failed to set math scale: {e}")
+            return False
+
+    def autoscale_math(self, function_num: int) -> bool:
+        """Enable autoscale for math function display."""
+        if not self.is_connected:
+            return False
+        try:
+            # Enable autoscale for the math function
+            self._scpi_wrapper.write(f"DISplay:WAVEView1:MATH:MATH{function_num}:AUTOScale ON")
+            time.sleep(0.2)  # Autoscale needs time to take effect
+            self._logger.info(f"Math{function_num} autoscale enabled")
+            return True
+        except Exception as e:
+            self._logger.error(f"Failed to enable autoscale for math function: {e}")
             return False
 
     # ============================================================================

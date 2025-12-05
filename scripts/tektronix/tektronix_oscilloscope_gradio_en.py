@@ -971,18 +971,12 @@ class GradioMSO24GUI:
             return False
 
     def configure_channels(self, ch1_en: bool, ch2_en: bool, ch3_en: bool, ch4_en: bool,
-                          scale: float, offset: float, coupling: str, probe: float) -> str:
-        """Configure all channels with enable/disable"""
+                          scale: float, offset: float, coupling: str) -> str:
+        """Configure all channels with enable/disable (probe attenuation set separately)"""
         if not self.is_connected:
             return "[ERROR] Oscilloscope not connected"
 
         try:
-            if isinstance(probe, str):
-                probe_map = {"1x": 1.0, "10x": 10.0, "100x": 100.0, "1000x": 1000.0}
-                probe_value = probe_map.get(probe, float(probe))
-            else:
-                probe_value = float(probe)
-
             channel_states = {1: ch1_en, 2: ch2_en, 3: ch3_en, 4: ch4_en}
             results = []
 
@@ -1496,6 +1490,24 @@ class GradioMSO24GUI:
         except Exception as e:
             self._logger.error(f"Math scale error: {e}")
             return f"[ERROR] Math scale: {str(e)}"
+
+    def autoscale_math(self, function_num: int) -> str:
+        """Autoscale math function display"""
+        if not self.is_connected:
+            return "[ERROR] Oscilloscope not connected"
+
+        try:
+            with self.io_lock:
+                success = self.oscilloscope.autoscale_math(function_num)
+
+            if success:
+                return f"[OK] Math{function_num} autoscaled"
+            else:
+                return f"[ERROR] Failed to autoscale Math{function_num}"
+
+        except Exception as e:
+            self._logger.error(f"Math autoscale error: {e}")
+            return f"[ERROR] Math autoscale: {str(e)}"
 
     def measure_all_for_source(self, source: str) -> Tuple[str, str]:
         """Configure all standard measurements for the given source."""
@@ -2027,18 +2039,18 @@ class GradioMSO24GUI:
                         choices=["DC", "AC", "DCREJECT"],
                         value="DC"
                     )
-                    probe = gr.Dropdown(
-                        label="Probe",
-                        choices=[("1x", 1), ("10x", 10), ("100x", 100), ("1000x", 1000)],
-                        value=10
-                    )
+                    # probe = gr.Dropdown(
+                    #     label="Probe",
+                    #     choices=[("1x", 1), ("10x", 10), ("100x", 100), ("1000x", 1000)],
+                    #     value=10
+                    #)
 
                 config_channel_btn = gr.Button("Configure Channels", variant="primary")
                 channel_status = gr.Textbox(label="Status", interactive=False, lines=5)
 
                 config_channel_btn.click(
                     fn=self.configure_channels,
-                    inputs=[ch1_select, ch2_select, ch3_select, ch4_select, v_scale, v_offset, coupling, probe],
+                    inputs=[ch1_select, ch2_select, ch3_select, ch4_select, v_scale, v_offset, coupling],
                     outputs=[channel_status]
                 )
 
@@ -2050,33 +2062,37 @@ class GradioMSO24GUI:
                     probe_ch1 = gr.Dropdown(
                         label="CH1 Probe",
                         choices=["1x", "10x", "100x", "1000x"],
-                        value="10x"
+                        value="10x",
+                        scale=3
                     )
-                    probe_ch1_btn = gr.Button("Set CH1", variant="secondary", scale=0.5)
+                    probe_ch1_btn = gr.Button("Set CH1", variant="secondary", scale=1)
 
                 with gr.Row():
                     probe_ch2 = gr.Dropdown(
                         label="CH2 Probe",
                         choices=["1x", "10x", "100x", "1000x"],
-                        value="1x"
+                        value="1x",
+                        scale=3
                     )
-                    probe_ch2_btn = gr.Button("Set CH2", variant="secondary", scale=0.5)
+                    probe_ch2_btn = gr.Button("Set CH2", variant="secondary", scale=1)
 
                 with gr.Row():
                     probe_ch3 = gr.Dropdown(
                         label="CH3 Probe",
                         choices=["1x", "10x", "100x", "1000x"],
-                        value="10x"
+                        value="10x",
+                        scale=3
                     )
-                    probe_ch3_btn = gr.Button("Set CH3", variant="secondary", scale=0.5)
+                    probe_ch3_btn = gr.Button("Set CH3", variant="secondary", scale=1)
 
                 with gr.Row():
                     probe_ch4 = gr.Dropdown(
                         label="CH4 Probe",
                         choices=["1x", "10x", "100x", "1000x"],
-                        value="10x"
+                        value="10x",
+                        scale=3
                     )
-                    probe_ch4_btn = gr.Button("Set CH4", variant="secondary", scale=0.5)
+                    probe_ch4_btn = gr.Button("Set CH4", variant="secondary", scale=1)
 
                 probe_status = gr.Textbox(label="Probe Status", interactive=False, lines=3)
 
@@ -2384,6 +2400,7 @@ class GradioMSO24GUI:
                 with gr.Row():
                     toggle_display_btn = gr.Button("Toggle Display", variant="primary", scale=1)
                     set_scale_btn = gr.Button("Set Scale", variant="primary", scale=1)
+                    autoscale_math_btn = gr.Button("Autoscale", variant="secondary", scale=1)
 
                 display_status = gr.Textbox(label="Display Status", interactive=False)
                 scale_status = gr.Textbox(label="Scale Status", interactive=False)
@@ -2397,6 +2414,12 @@ class GradioMSO24GUI:
                 set_scale_btn.click(
                     fn=self.set_math_scale,
                     inputs=[math_func_num, math_v_scale],
+                    outputs=[scale_status]
+                )
+
+                autoscale_math_btn.click(
+                    fn=self.autoscale_math,
+                    inputs=[math_func_num],
                     outputs=[scale_status]
                 )
 
@@ -2526,9 +2549,8 @@ class GradioMSO24GUI:
                     update_paths_btn = gr.Button("Update Paths", variant="secondary")
                     path_status = gr.Textbox(label="Path Status", interactive=False)
 
-                    def update_paths(data_dir, graphs_dir, screenshots_dir):
+                    def update_paths(data_dir, screenshots_dir):
                         self.save_locations['data'] = data_dir
-                        self.save_locations['graphs'] = graphs_dir
                         self.save_locations['screenshots'] = screenshots_dir
 
                         # Update backend oscilloscope directories
@@ -2536,7 +2558,6 @@ class GradioMSO24GUI:
                             with self.io_lock:
                                 self.oscilloscope.set_output_directories(
                                     data_dir=data_dir,
-                                    graph_dir=graphs_dir,
                                     screenshot_dir=screenshots_dir
                                 )
 
