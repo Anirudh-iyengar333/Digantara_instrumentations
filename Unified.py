@@ -92,6 +92,37 @@
 ║    2025-11-18: Fixed waveform duration estimation to include VISA overhead    ║
 ║               Added INSTRUMENT_OVERHEAD_PER_POINT constant (~1.95s)           ║
 ║                                                                               ║
+╚════════════════════════════════════════════════════════════════════════════════╝
+"""
+
+# =============================================================================
+# ⚙️ FILE SAVE LOCATION CONFIGURATION - EDIT THESE PATHS
+# =============================================================================
+# INSTRUCTIONS: Enter the FULL file paths where you want to save files.
+# - Use raw strings (prefix with r) for Windows paths
+# - Example: r"C:\Users\YourName\Documents\LabData"
+# - Make sure the server has write permissions to these directories
+# - Directories will be created automatically if they don't exist
+# =============================================================================
+
+# DMM (Digital Multimeter) data export paths
+DMM_DATA_PATH = r"C:\Users\AnirudhIyengar\Desktop\dmm_data"
+DMM_PLOT_PATH = r"C:\Users\AnirudhIyengar\Desktop\dmm_plots"
+
+# PSU (Power Supply) data export paths
+PSU_DATA_PATH = r"C:\Users\AnirudhIyengar\Desktop\psu_data"
+PSU_WAVEFORM_PATH = r"C:\Users\AnirudhIyengar\Desktop\psu_waveforms"
+
+# Oscilloscope data export paths
+OSC_DATA_PATH = r"C:\Users\AnirudhIyengar\Desktop\oscilloscope_data"
+OSC_GRAPH_PATH = r"C:\Users\AnirudhIyengar\Desktop\oscilloscope_graphs"
+OSC_SCREENSHOT_PATH = r"C:\Users\AnirudhIyengar\Desktop\oscilloscope_screenshots"
+
+# =============================================================================
+# END OF CONFIGURATION - DO NOT EDIT BELOW THIS LINE
+# =============================================================================
+
+"""
 ║  ═══════════════════════════════════════════════════════════════════════════  ║
 ║  QUICK CUSTOMIZATION GUIDE (For Non-Coders)                                   ║
 ║  ═══════════════════════════════════════════════════════════════════════════  ║
@@ -5075,26 +5106,13 @@ class GradioOscilloscopeGUI:
             self.logger.error(f"Automation error: {e}")
             return f"Automation error: {str(e)}"
 
-    def browse_folder(self, current_path, folder_type="folder"):
-        """Open file dialog for folder selection"""
-        try:
-            root = tk.Tk()
-            root.withdraw()
-            root.lift()
-            root.attributes('-topmost', True)
-            initial_dir = current_path if Path(current_path).exists() else str(Path.cwd())
-            selected_path = filedialog.askdirectory(
-                title=f"Select {folder_type} Directory",
-                initialdir=initial_dir
-            )
-            root.destroy()
-            if selected_path:
-                return selected_path
-            else:
-                return current_path
-        except Exception as e:
-            print(f"Browse error: {e}")
-            return current_path
+    def browse_folder(self, current_path, _folder_type="folder"):
+        """
+        Validate and return the provided path.
+        Note: Browse dialog removed - users should manually edit the path textbox.
+        When accessing via localhost, users can specify any path on their local machine.
+        """
+        return current_path if current_path else str(Path.cwd())
 
     def create_interface(self):
         """
@@ -5543,39 +5561,8 @@ class UnifiedInstrumentControl:
             outputs=[dmm_trend_plot]
         )
 
-        # Browse button for DMM data export
-        def dmm_browse_folder():
-            """Open folder browser dialog for DMM export"""
-            import tkinter as tk
-            from tkinter import filedialog
-            root = tk.Tk()
-            root.withdraw()
-            root.attributes('-topmost', True)
-            folder_path = filedialog.askdirectory(title="Select Save Location for DMM Data")
-            root.destroy()
-            return folder_path if folder_path else ""
-
-        dmm_export_browse_btn.click(
-            fn=dmm_browse_folder,
-            outputs=[dmm_export_path]
-        )
-
-        # Browse button for DMM plot save
-        def dmm_plot_browse_folder():
-            """Open folder browser dialog for DMM plot save"""
-            import tkinter as tk
-            from tkinter import filedialog
-            root = tk.Tk()
-            root.withdraw()
-            root.attributes('-topmost', True)
-            folder_path = filedialog.askdirectory(title="Select Save Location for DMM Plots")
-            root.destroy()
-            return folder_path if folder_path else ""
-
-        dmm_plot_browse_btn.click(
-            fn=dmm_plot_browse_folder,
-            outputs=[dmm_plot_save_path]
-        )
+        # Note: Browse buttons removed - users should manually type/paste paths in the textboxes
+        # The export path and plot save path textboxes are directly editable by the user
 
         # Save plot button
         dmm_save_plot_btn.click(
@@ -5764,24 +5751,10 @@ class UnifiedInstrumentControl:
                 interactive=False
             )
 
-            # Browse button handler
-            def psu_browse_folder():
-                """Open folder browser dialog for PSU export"""
-                import tkinter as tk
-                from tkinter import filedialog
-                root = tk.Tk()
-                root.withdraw()
-                root.attributes('-topmost', True)
-                folder_path = filedialog.askdirectory(title="Select Save Location for PSU Data")
-                root.destroy()
-                return folder_path if folder_path else ""
+            # Note: Browse button removed - users should manually type/paste path in the textbox
+            # The export path textbox is directly editable by the user
 
             psu_auto_measure_cb.change(fn=self.psu_controller.toggle_auto_measure, inputs=psu_auto_measure_cb)
-
-            psu_export_browse_btn.click(
-                fn=psu_browse_folder,
-                outputs=[psu_export_path]
-            )
 
             psu_export_btn.click(
                 fn=self.psu_controller.export_measurement_data,
@@ -6419,22 +6392,8 @@ class UnifiedInstrumentControl:
                 outputs=[psu_waveform_status]
             )
 
-            # Browse button for waveform plot save
-            def psu_waveform_browse_folder():
-                """Open folder browser dialog for PSU waveform plot save"""
-                import tkinter as tk
-                from tkinter import filedialog
-                root = tk.Tk()
-                root.withdraw()
-                root.attributes('-topmost', True)
-                folder_path = filedialog.askdirectory(title="Select Save Location for Waveform Plots")
-                root.destroy()
-                return folder_path if folder_path else ""
-
-            psu_waveform_browse_btn.click(
-                fn=psu_waveform_browse_folder,
-                outputs=[psu_waveform_save_path]
-            )
+            # Note: Browse button removed - users should manually type/paste path in the textbox
+            # The waveform save path textbox is directly editable by the user
 
             # Save waveform plot button - uses the new save_waveform_plot function
             psu_save_waveform_btn.click(
@@ -7260,22 +7219,8 @@ class UnifiedInstrumentControl:
             outputs=[osc_operation_status]
         )
 
-        # Browse button for oscilloscope export
-        def osc_browse_folder():
-            """Open folder browser dialog for oscilloscope export"""
-            import tkinter as tk
-            from tkinter import filedialog
-            root = tk.Tk()
-            root.withdraw()
-            root.attributes('-topmost', True)
-            folder_path = filedialog.askdirectory(title="Select Save Location for Oscilloscope Data")
-            root.destroy()
-            return folder_path if folder_path else ""
-
-        osc_export_browse_btn.click(
-            fn=osc_browse_folder,
-            outputs=[osc_export_path]
-        )
+        # Note: Browse button removed - users should manually type/paste path in the textbox
+        # The export path textbox is directly editable by the user
 
         osc_export_btn.click(
             fn=self.oscilloscope_controller.export_csv,

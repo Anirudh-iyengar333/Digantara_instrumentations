@@ -34,6 +34,29 @@ TECHNOLOGY STACK:
 """
 
 # =============================================================================
+# ⚙️ FILE SAVE LOCATION CONFIGURATION - EDIT THESE PATHS
+# =============================================================================
+# INSTRUCTIONS: Enter the FULL file paths where you want to save files.
+# - Use raw strings (prefix with r) for Windows paths
+# - Example: r"C:\Users\YourName\Documents\Oscilloscope\Data"
+# - Make sure the server has write permissions to these directories
+# - Directories will be created automatically if they don't exist
+# =============================================================================
+
+# CSV data files location (waveform data exports)
+CSV_DATA_PATH = r"C:\Users\AnirudhIyengar\Downloads\test\Data"
+
+# Graph/plot images location (PNG files)
+GRAPH_PATH = r"C:\Users\AnirudhIyengar\Desktop\oscilloscope_graphs"
+
+# Screenshot images location (oscilloscope screen captures)
+SCREENSHOT_PATH = r"C:\Users\AnirudhIyengar\Downloads\test\Screenshots"
+
+# =============================================================================
+# END OF CONFIGURATION - DO NOT EDIT BELOW THIS LINE UNLESS YOU KNOW WHAT YOU'RE DOING
+# =============================================================================
+
+# =============================================================================
 # IMPORT STATEMENTS - External Libraries Required by This Application
 # =============================================================================
 
@@ -43,8 +66,7 @@ import logging              # Error and information logging to track application
 import threading            # Multi-threading support for concurrent operations
 import queue                # Thread-safe queue for data exchange between threads
 import time                 # Time-related functions (delays, timestamps)
-import tkinter as tk        # GUI library for file/folder dialogs
-from tkinter import filedialog  # File selection dialog windows
+# Removed tkinter imports - no longer needed for web-based file path input
 from pathlib import Path    # Modern file path handling (works on Windows/Mac/Linux)
 from datetime import datetime   # Date and time handling for timestamps
 from typing import Optional, Dict, Any, List, Tuple, Union  # Type hints for code clarity
@@ -677,12 +699,11 @@ class GradioMSO24GUI:
         # ---------------------------------------------------------------------
         # FILE SAVE LOCATIONS
         # ---------------------------------------------------------------------
-        # Default directories for saving various types of output files
-        base_path = Path.cwd()  # Get current working directory
+        # Use the configured paths from the top of the file
         self.save_locations = {
-            'data': str(base_path / "oscilloscope_data"),         # CSV data files
-            'graphs': str(base_path / "oscilloscope_graphs"),     # Plot images (PNG)
-            'screenshots': str(base_path / "oscilloscope_screenshots")  # Scope screenshots
+            'data': CSV_DATA_PATH,         # CSV data files
+            'graphs': GRAPH_PATH,          # Plot images (PNG)
+            'screenshots': SCREENSHOT_PATH  # Scope screenshots
         }
 
         # Create all directories if they don't exist
@@ -1620,10 +1641,10 @@ class GradioMSO24GUI:
             self._logger.error(f"Autoscale error: {e}")
             return f"[ERROR] Autoscale: {str(e)}"
 
-    def capture_screenshot(self) -> str:
-        """Capture oscilloscope screenshot"""
+    def capture_screenshot(self):
+        """Capture oscilloscope screenshot and return status + file path for download"""
         if not self.is_connected:
-            return "[ERROR] Oscilloscope not connected"
+            return "[ERROR] Oscilloscope not connected", None
 
         try:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -1646,13 +1667,13 @@ class GradioMSO24GUI:
                 )
 
             if screenshot_path and os.path.exists(screenshot_path):
-                return f"[OK] Screenshot saved: {screenshot_path}"
+                return f"[OK] Screenshot saved: {screenshot_path}", screenshot_path
             else:
-                return "[ERROR] Failed to capture screenshot"
+                return "[ERROR] Failed to capture screenshot", None
 
         except Exception as e:
             self._logger.error(f"Screenshot error: {e}", exc_info=True)
-            return f"[ERROR] Screenshot: {str(e)}"
+            return f"[ERROR] Screenshot: {str(e)}", None
 
     def acquire_data(self, ch1: bool, ch2: bool, ch3: bool, ch4: bool,
                      math1: bool, math2: bool, math3: bool, math4: bool) -> str:
@@ -1715,16 +1736,17 @@ class GradioMSO24GUI:
             self._logger.error(f"Data acquisition error: {e}")
             return f"[ERROR] Data acquisition: {str(e)}"
 
-    def export_csv(self) -> str:
-        """Export current waveform data to CSV files"""
+    def export_csv(self):
+        """Export current waveform data to CSV files and return paths for download"""
         if not self.current_waveform_data:
-            return "[WARNING] No waveform data to export"
+            return "[WARNING] No waveform data to export", []
 
         try:
             result = f"CSV Export Results:\n"
             result += "-" * 40 + "\n"
 
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            csv_files = []  # Collect all generated CSV file paths
 
             for channel, data in self.current_waveform_data.items():
                 filename = f"MSO24_{channel}_data_{timestamp}"
@@ -1732,17 +1754,18 @@ class GradioMSO24GUI:
                     data, filename, self.save_locations['data']
                 )
                 result += f"{channel}: {csv_path}\n"
+                csv_files.append(csv_path)
 
-            return result
+            return result, csv_files
 
         except Exception as e:
             self._logger.error(f"CSV export error: {e}")
-            return f"[ERROR] CSV export: {str(e)}"
+            return f"[ERROR] CSV export: {str(e)}", []
 
 
     def run_full_automation(self, ch1: bool, ch2: bool, ch3: bool, ch4: bool,
-                           math1: bool, math2: bool, math3: bool, math4: bool, title: str) -> str:
-        """Run complete automation sequence"""
+                           math1: bool, math2: bool, math3: bool, math4: bool, title: str):
+        """Run complete automation sequence and return files for download"""
         try:
             result = "Full Automation Sequence:\n"
             result += "=" * 50 + "\n"
@@ -1756,49 +1779,34 @@ class GradioMSO24GUI:
             # reported in the log but do not stop the rest of the automation steps.
             if ("[ERROR] Oscilloscope not connected" in acq_result or
                 "[ERROR] Data acquisition:" in acq_result):
-                return result + "Automation stopped due to acquisition failure."
+                return result + "Automation stopped due to acquisition failure.", None, []
 
             # Step 2: Export CSV
             result += "Step 2: CSV Export\n"
-            csv_result = self.export_csv()
+            csv_result, csv_files = self.export_csv()  # Get CSV file paths
             result += csv_result + "\n"
 
             # Step 3: Capture screenshot
             result += "Step 3: Screenshot Capture\n"
-            screenshot_result = self.capture_screenshot()
+            screenshot_result, screenshot_file = self.capture_screenshot()  # Get screenshot path
             result += screenshot_result + "\n"
 
             result += "=" * 50 + "\n"
             result += "[OK] Full automation sequence completed successfully!"
 
-            return result
+            return result, screenshot_file, csv_files
 
         except Exception as e:
             self._logger.error(f"Full automation error: {e}")
-            return f"[ERROR] Full automation: {str(e)}"
+            return f"[ERROR] Full automation: {str(e)}", None, []
 
-    def browse_folder(self, current_path: str, folder_type: str) -> str:
-        """Browse for folder using tkinter dialog"""
-        try:
-            root = tk.Tk()
-            root.withdraw()  # Hide main window
-            root.attributes('-topmost', True)  # Bring to front
-
-            selected_path = filedialog.askdirectory(
-                title=f"Select {folder_type} Directory",
-                initialdir=current_path
-            )
-
-            root.destroy()
-
-            if selected_path:
-                return selected_path
-            else:
-                return current_path
-
-        except Exception as e:
-            self._logger.error(f"Folder browser error: {e}")
-            return current_path
+    def browse_folder(self, current_path: str, _folder_type: str = "") -> str:
+        """
+        Validate and return the provided path.
+        Note: Browse dialog removed - users should manually edit the path textbox.
+        When accessing via localhost, users can specify any path on their local machine.
+        """
+        return current_path if current_path else str(Path.cwd())
 
     def create_interface(self):
         """
@@ -2526,82 +2534,20 @@ class GradioMSO24GUI:
             # OPERATIONS & FILE MANAGEMENT TAB
             # ================================================================
             with gr.Tab("Operations & File Management"):
-                gr.Markdown("### File Save Locations")
+                gr.Markdown("### File Save Locations (Server-Side)")
+                gr.Markdown("Files are saved on the server in the following directories. Use the download buttons below to get files after generation.")
 
-                # Path configuration
+                # Display-only path information
                 with gr.Group():
-                    with gr.Row():
-                        data_path = gr.Textbox(
-                            label="Data Directory",
-                            value=self.save_locations['data'],
-                            scale=3
-                        )
-                        data_browse_btn = gr.Button("Browse", scale=1)
-
-                    with gr.Row():
-                        screenshots_path = gr.Textbox(
-                            label="Screenshots Directory",
-                            value=self.save_locations['screenshots'],
-                            scale=3
-                        )
-                        screenshots_browse_btn = gr.Button("Browse", scale=1)
-
-                    update_paths_btn = gr.Button("Update Paths", variant="secondary")
-                    path_status = gr.Textbox(label="Path Status", interactive=False)
-
-                    def update_paths(data_dir, screenshots_dir):
-                        self.save_locations['data'] = data_dir
-                        self.save_locations['screenshots'] = screenshots_dir
-
-                        # Update backend oscilloscope directories
-                        if self.is_connected and self.oscilloscope:
-                            with self.io_lock:
-                                self.oscilloscope.set_output_directories(
-                                    data_dir=data_dir,
-                                    screenshot_dir=screenshots_dir
-                                )
-
-                        return "[OK] File paths updated successfully"
-
-                    def browse_data_folder(current_path):
-                        new_path = self.browse_folder(current_path, "Data")
-                        self.save_locations['data'] = new_path
-
-                        # Update backend oscilloscope data directory
-                        if self.is_connected and self.oscilloscope:
-                            with self.io_lock:
-                                self.oscilloscope.set_output_directories(data_dir=new_path)
-
-                        return new_path, f"[OK] Data directory updated to: {new_path}"
-
-                    def browse_screenshots_folder(current_path):
-                        new_path = self.browse_folder(current_path, "Screenshots")
-                        self.save_locations['screenshots'] = new_path
-
-                        # Update backend oscilloscope screenshot directory
-                        if self.is_connected and self.oscilloscope:
-                            with self.io_lock:
-                                self.oscilloscope.set_output_directories(screenshot_dir=new_path)
-
-                        return new_path, f"[OK] Screenshots directory updated to: {new_path}"
-
-                    # Connect path management buttons
-                    update_paths_btn.click(
-                        fn=update_paths,
-                        inputs=[data_path, screenshots_path],
-                        outputs=[path_status]
+                    gr.Textbox(
+                        label="Data Directory (CSV files)",
+                        value=self.save_locations['data'],
+                        interactive=False
                     )
-
-                    data_browse_btn.click(
-                        fn=browse_data_folder,
-                        inputs=[data_path],
-                        outputs=[data_path, path_status]
-                    )
-
-                    screenshots_browse_btn.click(
-                        fn=browse_screenshots_folder,
-                        inputs=[screenshots_path],
-                        outputs=[screenshots_path, path_status]
+                    gr.Textbox(
+                        label="Screenshots Directory (PNG files)",
+                        value=self.save_locations['screenshots'],
+                        interactive=False
                     )
 
                 gr.Markdown("---")
@@ -2635,10 +2581,18 @@ class GradioMSO24GUI:
 
                 operation_status = gr.Textbox(label="Operation Status", interactive=False, lines=10)
 
+                # Download section
+                gr.Markdown("### Download Files")
+                gr.Markdown("After capturing screenshots or exporting data, download the files below:")
+
+                with gr.Row():
+                    screenshot_download = gr.File(label="Latest Screenshot", interactive=False)
+                    csv_download = gr.File(label="Exported CSV Files", interactive=False, file_count="multiple")
+
                 screenshot_btn.click(
                     fn=self.capture_screenshot,
                     inputs=[],
-                    outputs=[operation_status]
+                    outputs=[operation_status, screenshot_download]
                 )
 
                 acquire_btn.click(
@@ -2650,13 +2604,13 @@ class GradioMSO24GUI:
                 export_btn.click(
                     fn=self.export_csv,
                     inputs=[],
-                    outputs=[operation_status]
+                    outputs=[operation_status, csv_download]
                 )
 
                 full_auto_btn.click(
                     fn=self.run_full_automation,
                     inputs=[op_ch1, op_ch2, op_ch3, op_ch4, op_math1, op_math2, op_math3, op_math4, plot_title_input],
-                    outputs=[operation_status]
+                    outputs=[operation_status, screenshot_download, csv_download]
                 )
 
             gr.Markdown("---")
