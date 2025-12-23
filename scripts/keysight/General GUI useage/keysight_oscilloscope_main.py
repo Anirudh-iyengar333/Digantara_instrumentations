@@ -43,19 +43,18 @@ import os  # Operating system interface for environment variables and file opera
 import threading  # Multi-threaded operation support for non-blocking GUI responsiveness
 import queue  # Thread-safe queue for inter-thread communication
 from datetime import datetime  # Timestamp generation for logging and file naming
-import time  # Lightweight sleeps for backoff on VISA lock
 
 import tkinter as tk  # Core GUI framework for creating windows and widgets
 from tkinter import ttk, messagebox, filedialog, scrolledtext  # Advanced GUI components: themed widgets, dialogs, text areas
 import pandas as pd  # Data manipulation and CSV export functionality
-import matplotlib.pyplot as plt  # Publication-quality graph plotting and visualization
 import matplotlib
+import matplotlib.pyplot as plt  # For plotting functionality
 matplotlib.rcParams['agg.path.chunksize'] = 10000  # Fix for large datasets
 matplotlib.rcParams['path.simplify'] = True
 import numpy as np  # Numerical array operations for waveform statistics
 
 # Add parent directories to Python path to find instrument_control
-script_dir = Path(__file__).resolve().parent.parent.parent
+script_dir = Path(__file__).resolve().parent.parent.parent.parent
 if str(script_dir) not in sys.path:
     sys.path.append(str(script_dir))
 
@@ -65,7 +64,7 @@ try:
 except ImportError as e:
     print(f"Error importing instrument control modules: {e}")
     print(f"Current Python path: {sys.path}")
-    print(f"Looking for instrument_control in: {script_dir}")
+    raise
     print("Please ensure the instrument_control package is in your Python path")
     sys.exit(1)
 
@@ -85,7 +84,6 @@ TRIGGER_SLOPE_MAP = {
     "Raising": "POS",
     "Falling": "NEG"
 }
-
 
 def _format_si_value(value: float, kind: str) -> str:
     v = abs(value)
@@ -119,7 +117,6 @@ def _format_si_value(value: float, kind: str) -> str:
         return f"{value:.2f} %"
     return f"{value}"
 
-
 def format_measurement_value(meas_type: str, value: Optional[float]) -> str:
     if value is None:
         return "N/A"
@@ -149,14 +146,13 @@ class OscilloscopeDataAcquisition:
         default_screenshot_dir (Path): Directory for instrument screenshots (default: ./screenshots/)
     """
 
-    def __init__(self, oscilloscope_instance, io_lock: Optional[threading.RLock] = None):
+    def __init__(self, oscilloscope_instance):
         """Initialize data acquisition handler with oscilloscope reference."""
         self.scope = oscilloscope_instance  # Store reference to oscilloscope for method calls
         self._logger = logging.getLogger(f'{self.__class__.__name__}')  # Create diagnostic logger
         self.default_data_dir = Path.cwd() / "data"  # Default location for CSV data files
         self.default_graph_dir = Path.cwd() / "graphs"  # Default location for plot images
         self.default_screenshot_dir = Path.cwd() / "screenshots"  # Default location for screenshots
-        self.io_lock = io_lock  # Shared I/O lock for VISA/SCPI serialization
 
     def acquire_waveform_data(self, channel: int, max_points: int = 62500) -> Optional[Dict[str, Any]]:
         """
@@ -184,34 +180,18 @@ class OscilloscopeDataAcquisition:
             return None
 
         try:
-            lock = self.io_lock
-            if lock:
-                with lock:
-                    self.scope._scpi_wrapper.write(f":WAVeform:SOURce CHANnel{channel}")
-                    self.scope._scpi_wrapper.write(":WAVeform:FORMat BYTE")
-                    self.scope._scpi_wrapper.write(":WAVeform:POINts:MODE RAW")
-                    self.scope._scpi_wrapper.write(f":WAVeform:POINts {max_points}")
-                    preamble = self.scope._scpi_wrapper.query(":WAVeform:PREamble?")
-                    preamble_parts = preamble.split(',')
-                    y_increment = float(preamble_parts[7])
-                    y_origin = float(preamble_parts[8])
-                    y_reference = float(preamble_parts[9])
-                    x_increment = float(preamble_parts[4])
-                    x_origin = float(preamble_parts[5])
-                    raw_data = self.scope._scpi_wrapper.query_binary_values(":WAVeform:DATA?", datatype='B')
-            else:
-                self.scope._scpi_wrapper.write(f":WAVeform:SOURce CHANnel{channel}")
-                self.scope._scpi_wrapper.write(":WAVeform:FORMat BYTE")
-                self.scope._scpi_wrapper.write(":WAVeform:POINts:MODE RAW")
-                self.scope._scpi_wrapper.write(f":WAVeform:POINts {max_points}")
-                preamble = self.scope._scpi_wrapper.query(":WAVeform:PREamble?")
-                preamble_parts = preamble.split(',')
-                y_increment = float(preamble_parts[7])
-                y_origin = float(preamble_parts[8])
-                y_reference = float(preamble_parts[9])
-                x_increment = float(preamble_parts[4])
-                x_origin = float(preamble_parts[5])
-                raw_data = self.scope._scpi_wrapper.query_binary_values(":WAVeform:DATA?", datatype='B')
+            self.scope._scpi_wrapper.write(f":WAVeform:SOURce CHANnel{channel}")  # Set waveform source to specified channel
+            self.scope._scpi_wrapper.write(":WAVeform:FORMat BYTE")  # Configure 8-bit unsigned integer format for efficient transfer
+            self.scope._scpi_wrapper.write(":WAVeform:POINts:MODE RAW")  # Select RAW mode to capture all available memory
+            self.scope._scpi_wrapper.write(f":WAVeform:POINts {max_points}")  # Request specified maximum point count
+            preamble = self.scope._scpi_wrapper.query(":WAVeform:PREamble?")  # Query waveform metadata (10 calibration values)
+            preamble_parts = preamble.split(',')  # Parse comma-delimited preamble values
+            y_increment = float(preamble_parts[7])  # Extract voltage resolution (V per ADC count)
+            y_origin = float(preamble_parts[8])  # Extract voltage reference point
+            y_reference = float(preamble_parts[9])  # Extract ADC zero reference value
+            x_increment = float(preamble_parts[4])  # Extract time resolution (seconds per sample)
+            x_origin = float(preamble_parts[5])  # Extract acquisition start time
+            raw_data = self.scope._scpi_wrapper.query_binary_values(":WAVeform:DATA?", datatype='B')  # Retrieve binary waveform array
             voltage_data = [(value - y_reference) * y_increment + y_origin for value in raw_data]  # Convert ADC→voltage using calibration
             time_data = [x_origin + (i * x_increment) for i in range(len(voltage_data))]  # Generate time array with proper scaling
             self._logger.info(f"Successfully acquired {len(voltage_data)} points from channel {channel}")
@@ -226,24 +206,8 @@ class OscilloscopeDataAcquisition:
                 'acquisition_time': datetime.now().isoformat()  # Record acquisition timestamp for traceability
             }
         except Exception as e:  # Catch any communication or processing errors
-            err = str(e)
-            if "VI_ERROR_RSRC_LOCKED" in err or "resource is locked" in err:
-                # Brief backoff to allow other operation to finish
-                time.sleep(0.05)
             self._logger.error(f"Failed to acquire waveform data from channel {channel}: {e}")
             return None
-    # def parse_timebase_string(value: str) -> float:
-    #     value = value.strip().lower()
-    #     if "ns" in value:
-    #         return float(value.replace("ns", "").strip()) / 1_000_000_000
-    #     elif "µs" in value or "us" in value:
-    #         return float(value.replace("µs", "").replace("us", "").strip()) / 1_000_000
-    #     elif "ms" in value:
-    #         return float(value.replace("ms", "").strip()) / 1000
-    #     elif "s" in value:
-    #         return float(value.replace("s", "").strip())
-    #     else:
-    #         return float(value)  # Default - assume already in seconds
 
     def export_to_csv(self, waveform_data: Dict[str, Any], custom_path: Optional[str] = None, 
                      filename: Optional[str] = None) -> Optional[str]:
@@ -299,72 +263,7 @@ class OscilloscopeDataAcquisition:
             self._logger.error(f"Failed to export CSV: {e}")
             return None
 
-#     def generate_waveform_plot(self, waveform_data: Dict[str, Any], custom_path: Optional[str] = None,
-#                               filename: Optional[str] = None, plot_title: Optional[str] = None) -> Optional[str]:
-#         """
-#         Generate publication-quality plot with embedded statistics.
-        
-#         Creates a matplotlib figure showing voltage vs. time with grid overlay,
-#         and adds a statistics box (max, min, mean, RMS, std dev) calculated from
-#         the waveform for immediate visual analysis without external tools.
-        
-#         Args:
-#             waveform_data (Dict): Waveform dictionary from acquire_waveform_data()
-#             custom_path (Optional[str]): Override default save directory (None→default)
-#             filename (Optional[str]): Override auto-generated filename (None→auto-generate)
-#             plot_title (Optional[str]): Custom plot title (None→auto-generate from channel)
-        
-#         Returns:
-#             str: Full path to saved PNG file, or None if generation fails
-        
-#         Raises:
-#             Logs errors internally; returns None on failure (non-blocking)
-#         """
-#         if not waveform_data:  # Validate input data exists
-#             self._logger.error("No waveform data to plot")
-#             return None
-
-#         try:
-#             save_dir = Path(custom_path) if custom_path else self.default_graph_dir  # Select output directory
-#             self.scope.setup_output_directories()  # Create default directory structure if needed
-#             save_dir.mkdir(parents=True, exist_ok=True)  # Create target directory with parent folders
-#             if filename is None:  # Auto-generate filename if not provided
-#                 timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")  # Create readable timestamp
-#                 filename = f"waveform_plot_ch{waveform_data['channel']}_{timestamp}.png"  # Compose descriptive filename
-#             if not filename.lower().endswith(('.png', '.jpg', '.jpeg')):  # Validate image format
-#                 filename += '.png'  # Default to PNG if extension missing
-#             filepath = save_dir / filename  # Construct full file path
-#             plt.figure(figsize=(12, 8))  # Create new figure with wide aspect ratio for readability
-#             plt.plot(waveform_data['time'], waveform_data['voltage'], 'b-', linewidth=1)  # Plot waveform as blue line
-#             if plot_title is None:  # Auto-generate title if not provided
-#                 plot_title = f"Oscilloscope Waveform - Channel {waveform_data['channel']}"
-#             plt.title(plot_title, fontsize=14, fontweight='bold')  # Add descriptive title
-#             plt.xlabel('Time (s)', fontsize=12)  # Label X-axis with units
-#             plt.ylabel('Voltage (V)', fontsize=12)  # Label Y-axis with units
-#             plt.grid(True, alpha=0.3)  # Enable semi-transparent grid for reference
-#             voltage_array = np.array(waveform_data['voltage'])  # Convert to NumPy array for statistics
-#             stats_text = f"""Statistics:
-# Max: {np.max(voltage_array):.3f} V
-# Min: {np.min(voltage_array):.3f} V
-# Mean: {np.mean(voltage_array):.3f} V
-# RMS: {np.sqrt(np.mean(voltage_array**2)):.3f} V
-# Std Dev: {np.std(voltage_array):.3f} V
-# Points: {len(voltage_array)}"""  # Compute and format statistical summary
-#             plt.text(0.02, 0.98, stats_text, transform=plt.gca().transAxes,
-#                     fontsize=10, verticalalignment='top',
-#                     bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))  # Embed statistics box in plot corner
-#             plt.tight_layout()  # Adjust spacing to prevent label cutoff
-#             plt.savefig(filepath, dpi=1600, bbox_inches='tight')  # Save at high resolution (1600 DPI) for publication
-#             plt.close()  # Release memory by closing figure
-#             self._logger.info(f"Plot saved successfully: {filepath}")
-#             return str(filepath)  # Return path as string for downstream processing
-#         except Exception as e:  # Catch plotting or file I/O errors
-#             self._logger.error(f"Failed to generate plot: {e}")
-#             return None
-    # Always perform fresh measurements before plotting
     
-
-# Then update measurements_text as you already do, but use this new 'measurements' dict
 
     def generate_waveform_plot(self, waveform_data: Dict[str, Any], custom_path: Optional[str] = None,
                                 filename: Optional[str] = None, plot_title: Optional[str] = None) -> Optional[str]:
@@ -377,11 +276,7 @@ class OscilloscopeDataAcquisition:
         measurement_types = ["FREQ", "PERiod", "VPP", "VAMP", "OVERshoot", "VTOP", "VBASe", "VAVG", "VRMS", "VMAX", "VMIN", "RISE", "FALL", "DUTYcycle", "NDUTy"]
         for meas_type in measurement_types:
             try:
-                if self.io_lock:
-                    with self.io_lock:
-                        value = self.scope.measure_single(waveform_data['channel'], meas_type)
-                else:
-                    value = self.scope.measure_single(waveform_data['channel'], meas_type)
+                value = self.scope.measure_single(waveform_data['channel'], meas_type)
                 measurements[meas_type] = value
             except:
                     measurements[meas_type] = None
@@ -491,12 +386,6 @@ class EnhancedResponsiveAutomationGUI:
         self.setup_logging()  # Configure diagnostic logging
         self.setup_gui()  # Create GUI layout and widgets
         self.status_queue = queue.Queue()  # Create thread-safe communication channel
-        self.live_feed_active = False
-        self.live_feed_paused = False
-        self.live_feed_worker_running = False  # Prevent overlapping acquisitions
-        self.io_lock = threading.RLock()  # Serialize all VISA/SCPI access
-        # Declare trigger level variables dict early so type checkers see the attribute
-        self.channel_trigger_vars: dict[int, tk.DoubleVar] = {}
         self.check_status_updates()  # Start polling for status updates from worker threads
 
     def setup_logging(self):
@@ -510,7 +399,7 @@ class EnhancedResponsiveAutomationGUI:
     def setup_gui(self):
         """Construct responsive GUI layout with all control sections."""
         self.root.title("Keysight Oscilloscope Automation")  # Set window title
-        self.root.geometry("1200x900")  # Set initial window size (width × height pixels) - increased for live feed
+        self.root.geometry("1200x750")  # Set initial window size (width × height pixels)
         self.root.configure(bg='#f5f5f5')  # Light gray background for professional appearance
         self.root.minsize(1000, 600)  # Enforce minimum window size for usability
         self.root.columnconfigure(0, weight=1)  # Allow column to expand with window
@@ -518,40 +407,8 @@ class EnhancedResponsiveAutomationGUI:
         self.style = ttk.Style()  # Create themed widget style manager
         self.style.theme_use('clam')  # Use modern 'clam' theme for professional look
         self.configure_styles()  # Apply custom color and font styles
-        
-        # Create canvas and scrollbar for scrollable content
-        canvas_container = ttk.Frame(self.root)
-        canvas_container.grid(row=0, column=0, sticky='nsew', padx=3, pady=3)
-        canvas_container.columnconfigure(0, weight=1)
-        canvas_container.rowconfigure(0, weight=1)
-        
-        self.main_canvas = tk.Canvas(canvas_container, bg='#f5f5f5', highlightthickness=0)
-        scrollbar = ttk.Scrollbar(canvas_container, orient='vertical', command=self.main_canvas.yview)
-        
-        self.main_canvas.configure(yscrollcommand=scrollbar.set)
-        self.main_canvas.grid(row=0, column=0, sticky='nsew')
-        scrollbar.grid(row=0, column=1, sticky='ns')
-        
-        # Create main frame inside canvas
-        main_frame = ttk.Frame(self.main_canvas, padding="3")  # Main container with 3px padding
-        self.canvas_window = self.main_canvas.create_window((0, 0), window=main_frame, anchor='nw')
-        
-        # Bind canvas resize to update scroll region
-        def _configure_scroll(event):
-            self.main_canvas.configure(scrollregion=self.main_canvas.bbox('all'))
-        main_frame.bind('<Configure>', _configure_scroll)
-        
-        # Update canvas window width when canvas is resized
-        def _configure_canvas(event):
-            canvas_width = event.width
-            self.main_canvas.itemconfig(self.canvas_window, width=canvas_width)
-        self.main_canvas.bind('<Configure>', _configure_canvas)
-        
-        # Bind mousewheel scrolling
-        def _on_mousewheel(event):
-            self.main_canvas.yview_scroll(int(-1*(event.delta/120)), "units")
-        self.main_canvas.bind_all("<MouseWheel>", _on_mousewheel)
-        
+        main_frame = ttk.Frame(self.root, padding="3")  # Main container with 3px padding
+        main_frame.grid(row=0, column=0, sticky='nsew', padx=3, pady=3)  # Fill entire window
         main_frame.columnconfigure(0, weight=1)  # Allow column to expand
         main_frame.rowconfigure(0, weight=0)  # Title: fixed size
         main_frame.rowconfigure(1, weight=0)  # Connection: fixed size
@@ -559,10 +416,9 @@ class EnhancedResponsiveAutomationGUI:
         main_frame.rowconfigure(3, weight=0)  # Timebase/trigger: fixed size
         main_frame.rowconfigure(4, weight=0)  # Function generators: fixed size
         main_frame.rowconfigure(5, weight=0)  # File preferences: fixed size
-        main_frame.rowconfigure(6, weight=0)  # Operations buttons: fixed size (MOVED UP)
-        main_frame.rowconfigure(7, weight=0)  # Measurement: fixed size
-        main_frame.rowconfigure(8, weight=0)  # Live feed: fixed size
-        main_frame.rowconfigure(9, weight=1)  # Status log: EXPANDABLE to fill remaining space
+        main_frame.rowconfigure(6, weight=0)  # Measurement: fixed size (NEW)
+        main_frame.rowconfigure(7, weight=0)  # Operations buttons: fixed size
+        main_frame.rowconfigure(8, weight=1)  # Status log: EXPANDABLE to fill remaining space
         title_label = ttk.Label(main_frame, text="Keysight Oscilloscope Automation", style='Title.TLabel')
         title_label.grid(row=0, column=0, pady=(0, 3), sticky='ew')  # Span full width
         self.create_connection_frame(main_frame, row=1)  # Add connection controls
@@ -570,12 +426,12 @@ class EnhancedResponsiveAutomationGUI:
         self.create_timebase_trigger_frame(main_frame, row=3)  # Add timebase/trigger controls
         self.create_function_generator_frame(main_frame, row=4)  # Add function generator controls
         self.create_file_preferences_frame(main_frame, row=5)  # Add file path settings
-        self.create_operations_frame(main_frame, row=6)  # Add operation buttons (MOVED UP)
-        self.create_measurement_frame(main_frame, row=7)  # Measurement & autoscale
-        self.create_live_feed_frame(main_frame, row=8)  # Add live signal feed
-        self.create_status_frame(main_frame, row=9)  # Add status log (expandable)
-        self.disable_operation_buttons()  # Disable all buttons until connection established
+        self.create_measurement_frame(main_frame, row=6)  # Measurement & autoscale (NEW)
+        self.create_operations_frame(main_frame, row=7)  # Add operation buttons
+        self.create_status_frame(main_frame, row=8)  # Add status log (expandable)
         self.main_frame = main_frame  # Store reference for future modifications
+        # Declare attribute to avoid unknown attribute errors
+        self.channel_trigger_vars: dict[int, tk.DoubleVar] = {}
 
     def configure_styles(self):
         """Define custom widget styles for consistent professional appearance."""
@@ -837,11 +693,11 @@ class EnhancedResponsiveAutomationGUI:
 
     def create_measurement_frame(self, parent, row):
         """Create measurement controls for waveform analysis."""
-        meas_frame = ttk.LabelFrame(parent, text="Measurements & Acquisition Control", padding="3")
+        meas_frame = ttk.LabelFrame(parent, text="Measurements & Autoscale", padding="3")
         meas_frame.grid(row=row, column=0, sticky='ew', pady=(0, 2))
-        for i in range(14):  # Increased columns for RUN/STOP/SINGLE buttons
+        for i in range(10):
             meas_frame.columnconfigure(i, weight=0)
-        meas_frame.columnconfigure(13, weight=1)
+        meas_frame.columnconfigure(9, weight=1)
         col = 0
         ttk.Label(meas_frame, text="MEASUREMENT:", font=('Arial', 8, 'bold'), foreground='#1a365d').grid(row=0, column=col, sticky='w', padx=(0, 5))
         col += 1
@@ -866,22 +722,7 @@ class EnhancedResponsiveAutomationGUI:
         col += 1
         ttk.Separator(meas_frame, orient='vertical').grid(row=0, column=col, sticky='ns', padx=5)
         col += 1
-
-        # Acquisition Control Buttons
-        ttk.Label(meas_frame, text="CONTROL:", font=('Arial', 8, 'bold'), foreground='#1a365d').grid(row=0, column=col, sticky='w', padx=(0, 5))
-        col += 1
-        self.run_btn = ttk.Button(meas_frame, text="▶ RUN", width=8, command=self.run_acquisition, style='Success.TButton', state='disabled')
-        self.run_btn.grid(row=0, column=col, sticky='ew', padx=2)
-        col += 1
-        self.stop_btn = ttk.Button(meas_frame, text="⏹ STOP", width=8, command=self.stop_acquisition, style='Danger.TButton', state='disabled')
-        self.stop_btn.grid(row=0, column=col, sticky='ew', padx=2)
-        col += 1
-        self.single_btn = ttk.Button(meas_frame, text="⏯ SINGLE", width=9, command=self.single_acquisition, style='Warning.TButton', state='disabled')
-        self.single_btn.grid(row=0, column=col, sticky='ew', padx=2)
-        col += 1
-        ttk.Separator(meas_frame, orient='vertical').grid(row=0, column=col, sticky='ns', padx=5)
-        col += 1
-        self.autoscale_btn = ttk.Button(meas_frame, text="⚡ Autoscale", width=11, command=self.perform_autoscale, style='Info.TButton', state='disabled')
+        self.autoscale_btn = ttk.Button(meas_frame, text="⚡ Autoscale", width=12, command=self.perform_autoscale, style='Success.TButton', state='disabled')
         self.autoscale_btn.grid(row=0, column=col, sticky='ew', padx=2)
 
     def create_operations_frame(self, parent, row):
@@ -900,8 +741,9 @@ class EnhancedResponsiveAutomationGUI:
         self.generate_plot_btn.grid(row=0, column=3, sticky='ew', padx=1)
         self.full_automation_btn = ttk.Button(ops_frame, text="Full Auto", command=self.run_full_automation, style='Primary.TButton')
         self.full_automation_btn.grid(row=0, column=4, sticky='ew', padx=1)
-        self.open_folder_btn = ttk.Button(ops_frame, text="Open Folder", command=self.open_output_folder, style='Info.TButton', width=12)
+        self.open_folder_btn = ttk.Button(ops_frame, text="Open Folder", command=self.open_output_folder, style='Info.TButton')
         self.open_folder_btn.grid(row=0, column=5, sticky='ew', padx=1)
+        self.disable_operation_buttons()  # Initially disable until connection established
 
     def create_status_frame(self, parent, row):
         """Create expandable status log with color-coded message display."""
@@ -930,232 +772,20 @@ class EnhancedResponsiveAutomationGUI:
                                                  wrap=tk.WORD)
         self.log_text.grid(row=2, column=0, sticky='nsew')  # Expand to fill remaining space
 
-    def create_live_feed_frame(self, parent, row):
-        """Create live signal feed display with embedded matplotlib canvas."""
-        from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-        from matplotlib.figure import Figure
-        
-        live_frame = ttk.LabelFrame(parent, text="🔴 Live Signal Feed", padding="3")
-        live_frame.grid(row=row, column=0, sticky='ew', pady=(0, 2))  # Changed to 'ew' to prevent vertical expansion
-        live_frame.columnconfigure(0, weight=1)
-        live_frame.rowconfigure(1, weight=0)  # Canvas row fixed height
-        
-        # Control panel
-        controls_frame = ttk.Frame(live_frame)
-        controls_frame.grid(row=0, column=0, sticky='ew', pady=(0, 2))
-        
-        col = 0
-        ttk.Label(controls_frame, text="Channel:", font=('Arial', 8, 'bold')).grid(row=0, column=col, sticky='w', padx=(0, 2))
-        col += 1
-        
-        self.live_feed_channel_var = tk.IntVar(value=1)
-        for ch in [1, 2, 3, 4]:
-            rb = ttk.Radiobutton(controls_frame, text=f"Ch{ch}", variable=self.live_feed_channel_var, value=ch)
-            rb.grid(row=0, column=col, padx=2)
-            col += 1
-        
-        ttk.Separator(controls_frame, orient='vertical').grid(row=0, column=col, sticky='ns', padx=5)
-        col += 1
-        
-        ttk.Label(controls_frame, text="Update:", font=('Arial', 8)).grid(row=0, column=col, sticky='w', padx=(0, 2))
-        col += 1
-        
-        self.live_feed_rate_var = tk.IntVar(value=500)
-        rate_combo = ttk.Combobox(controls_frame, textvariable=self.live_feed_rate_var,
-                                  values=["100", "200", "500", "1000", "2000"], width=6, state='readonly', font=('Arial', 8))
-        rate_combo.grid(row=0, column=col, padx=(0, 2))
-        col += 1
-        
-        ttk.Label(controls_frame, text="ms", font=('Arial', 8)).grid(row=0, column=col, sticky='w', padx=(0, 8))
-        col += 1
-        
-        self.live_feed_autoscale_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(controls_frame, text="Auto Y-Scale", variable=self.live_feed_autoscale_var).grid(row=0, column=col, padx=5)
-        col += 1
-        
-        self.live_feed_grid_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(controls_frame, text="Grid", variable=self.live_feed_grid_var).grid(row=0, column=col, padx=5)
-        col += 1
-        
-        ttk.Separator(controls_frame, orient='vertical').grid(row=0, column=col, sticky='ns', padx=5)
-        col += 1
-        
-        self.live_feed_start_btn = ttk.Button(controls_frame, text="▶ Start", width=8,
-                                              command=self.start_live_feed, style='Success.TButton', state='disabled')
-        self.live_feed_start_btn.grid(row=0, column=col, sticky='ew', padx=2)
-        col += 1
-        
-        self.live_feed_pause_btn = ttk.Button(controls_frame, text="⏸ Pause", width=8,
-                                              command=self.pause_live_feed, style='Warning.TButton', state='disabled')
-        self.live_feed_pause_btn.grid(row=0, column=col, sticky='ew', padx=2)
-        col += 1
-        
-        self.live_feed_stop_btn = ttk.Button(controls_frame, text="⏹ Stop", width=8,
-                                             command=self.stop_live_feed, style='Warning.TButton', state='disabled')
-        self.live_feed_stop_btn.grid(row=0, column=col, sticky='ew', padx=2)
-        col += 1
-        
-        # Status indicator
-        self.live_feed_status_var = tk.StringVar(value="● Stopped")
-        self.live_feed_status_label = ttk.Label(controls_frame, textvariable=self.live_feed_status_var,
-                                                 font=('Arial', 8, 'bold'), foreground='#dc2626')
-        self.live_feed_status_label.grid(row=0, column=col, sticky='e', padx=(10, 0))
-        controls_frame.columnconfigure(col, weight=1)
-        
-        # Matplotlib canvas
-        canvas_frame = ttk.Frame(live_frame, relief='sunken', borderwidth=1, height=280)
-        canvas_frame.grid(row=1, column=0, sticky='ew')
-        canvas_frame.grid_propagate(False)  # Prevent frame from resizing to content
-        canvas_frame.columnconfigure(0, weight=1)
-        canvas_frame.rowconfigure(0, weight=1)
-        
-        # Create matplotlib figure
-        self.live_fig = Figure(figsize=(10, 2.5), dpi=100, facecolor='#1a1a1a')
-        self.live_ax = self.live_fig.add_subplot(111, facecolor='#0a0a0a')
-        self.live_ax.set_xlabel('Time (s)', color='#00ff00', fontsize=9)
-        self.live_ax.set_ylabel('Voltage (V)', color='#00ff00', fontsize=9)
-        self.live_ax.tick_params(colors='#00ff00', labelsize=8)
-        self.live_ax.grid(True, alpha=0.2, color='#00ff00')
-        self.live_fig.tight_layout()
-        
-        # Initialize empty plot line
-        self.live_line, = self.live_ax.plot([], [], 'g-', linewidth=1.5)
-        
-        # Embed in tkinter
-        self.live_canvas = FigureCanvasTkAgg(self.live_fig, master=canvas_frame)
-        self.live_canvas.draw()
-        self.live_canvas.get_tk_widget().grid(row=0, column=0, sticky='nsew')
-
-    def start_live_feed(self):
-        """Start live waveform acquisition and display."""
-        if not self.oscilloscope or not self.oscilloscope.is_connected:
-            messagebox.showerror("Error", "Connect to oscilloscope first")
-            return
-        
-        self.live_feed_active = True
-        self.live_feed_paused = False
-        self.live_feed_status_var.set("● Running")
-        self.live_feed_status_label.config(foreground='#16a34a')  # Green
-        
-        self.live_feed_start_btn.config(state='disabled')
-        self.live_feed_pause_btn.config(state='normal')
-        self.live_feed_stop_btn.config(state='normal')
-        
-        self.log_message("Live feed started", 'SUCCESS')
-        self.update_live_feed()  # Start the update loop
-
-    def pause_live_feed(self):
-        """Pause live feed updates."""
-        self.live_feed_paused = True
-        self.live_feed_status_var.set("● Paused")
-        self.live_feed_status_label.config(foreground='#f59e0b')  # Orange
-        
-        self.live_feed_start_btn.config(state='normal', text="▶ Resume")
-        self.live_feed_pause_btn.config(state='disabled')
-        
-        self.log_message("Live feed paused", 'INFO')
-
-    def stop_live_feed(self):
-        """Stop live feed and clear display."""
-        self.live_feed_active = False
-        self.live_feed_paused = False
-        self.live_feed_worker_running = False
-        self.live_feed_status_var.set("● Stopped")
-        self.live_feed_status_label.config(foreground='#dc2626')  # Red
-        
-        self.live_feed_start_btn.config(state='normal', text="▶ Start")
-        self.live_feed_pause_btn.config(state='disabled')
-        self.live_feed_stop_btn.config(state='disabled')
-        
-        # Clear plot
-        self.live_line.set_data([], [])
-        self.live_canvas.draw()
-        
-        self.log_message("Live feed stopped", 'INFO')
-
-    def update_live_feed(self):
-        """Periodic update method for live waveform display."""
-        if not self.live_feed_active or self.live_feed_paused:
-            if self.live_feed_active and self.live_feed_paused:
-                # Still active but paused, schedule next check
-                update_rate = self.live_feed_rate_var.get()
-                self.root.after(update_rate, self.update_live_feed)
-            return
-        
-        def acquire_and_update():
-            try:
-                daq = self.data_acquisition
-                if not daq:
-                    self.status_queue.put(("error", "Not connected"))
-                    return
-                channel = self.live_feed_channel_var.get()
-                # Reduce points for responsiveness and lower I/O load
-                max_points = 2500 if self.live_feed_rate_var.get() <= 500 else 5000
-                waveform_data = daq.acquire_waveform_data(channel, max_points=max_points)
-                
-                if waveform_data:
-                    # Update plot on main thread
-                    self.root.after(0, lambda: self.update_live_plot(waveform_data))
-            except Exception as e:
-                self.log_message(f"Live feed error: {e}", 'ERROR')
-            finally:
-                self.live_feed_worker_running = False
-        
-        # Run acquisition in background thread
-        if self.live_feed_worker_running:
-            # Skip starting another acquisition; will reschedule below
-            pass
-        else:
-            self.live_feed_worker_running = True
-            threading.Thread(target=acquire_and_update, daemon=True).start()
-        
-        # Schedule next update
-        update_rate = self.live_feed_rate_var.get()
-        if self.live_feed_active:
-            self.root.after(update_rate, self.update_live_feed)
-
-    def update_live_plot(self, waveform_data):
-        """Update the matplotlib plot with new waveform data."""
-        try:
-            time_data = waveform_data['time']
-            voltage_data = waveform_data['voltage']
-            
-            # Update line data
-            self.live_line.set_data(time_data, voltage_data)
-            
-            # Update axis limits
-            if time_data:
-                self.live_ax.set_xlim(min(time_data), max(time_data))
-            
-            if self.live_feed_autoscale_var.get() and voltage_data:
-                v_min, v_max = min(voltage_data), max(voltage_data)
-                v_range = v_max - v_min if (v_max - v_min) > 0 else 1.0
-                self.live_ax.set_ylim(v_min - 0.1 * v_range, v_max + 0.1 * v_range)
-            
-            # Update grid visibility
-            self.live_ax.grid(self.live_feed_grid_var.get(), alpha=0.2, color='#00ff00')
-            
-            # Redraw canvas
-            self.live_canvas.draw()
-            
-        except Exception as e:
-            self.logger.error(f"Failed to update live plot: {e}")
-
     def configure_timebase(self):
         """Apply timebase configuration to oscilloscope via background thread."""
         def timebase_config_thread():  # Background thread worker function
             try:
                 time_scale_str = self.time_scale_var.get()  # Retrieve time/div setting from GUI
-                time_scale = parse_timebase_string(time_scale_str)  # Converts label to seconds per division
-                # time_offset = self.time_offset_var.get()  # Retrieve horizontal offset from GUI
+                time_scale = parse_timebase_string(time_scale_str)
+                #time_offset = self.time_offset_var.get()
                 self.update_status("Configuring timebase...")  # Update status display
                 self.log_message(f"Configuring timebase: {time_scale_str} ({time_scale}s/div)")
                 osc = self.oscilloscope
                 if not (osc and osc.is_connected):
                     self.status_queue.put(("error", "Not connected"))
                     return
-                with self.io_lock:
-                    success = osc.configure_timebase(time_scale)  # Call oscilloscope method
+                success = osc.configure_timebase(time_scale)
                 if success:
                     self.status_queue.put(("timebase_configured", f"Timebase configured: {time_scale}s/div"))
                 else:
@@ -1182,8 +812,7 @@ class EnhancedResponsiveAutomationGUI:
                 if not (osc and osc.is_connected):
                     self.status_queue.put(("error", "Not connected"))
                     return
-                with self.io_lock:
-                    success = osc.configure_trigger(channel, trigger_level, trigger_slope)
+                success = osc.configure_trigger(channel, trigger_level, trigger_slope)
                 if success:
                     self.status_queue.put(("trigger_configured", f"Trigger configured: {trigger_source} @ {trigger_level}V"))
                 else:
@@ -1210,8 +839,7 @@ class EnhancedResponsiveAutomationGUI:
                     if not (osc and osc.is_connected):
                         self.status_queue.put(("error", "Not connected"))
                         return
-                    with self.io_lock:
-                        success = osc.configure_trigger(channel, trigger_level, "POS")  # Positive edge for batch
+                    success = osc.configure_trigger(channel, trigger_level, "POS")
                     if success:
                         success_count += 1  # Increment success counter
                         self.log_message(f"Ch{channel} trigger level set successfully", "SUCCESS")
@@ -1345,7 +973,7 @@ class EnhancedResponsiveAutomationGUI:
                   self.generate_plot_btn, self.full_automation_btn, self.open_folder_btn,
                   self.config_channel_btn, self.test_btn, self.wgen1_apply_btn, self.wgen2_apply_btn,
                   self.timebase_apply_btn, self.trigger_apply_btn,
-                  self.measure_btn, self.autoscale_btn, self.live_feed_start_btn]  # NEW: Measurement & live feed buttons
+                  self.measure_btn, self.autoscale_btn]  # NEW: Measurement buttons
         for btn in buttons:  # Iterate all operation buttons
             try:
                 btn.configure(state='disabled')  # Disable button (grayed out)
@@ -1358,8 +986,7 @@ class EnhancedResponsiveAutomationGUI:
                   self.generate_plot_btn, self.full_automation_btn, self.open_folder_btn,
                   self.config_channel_btn, self.test_btn, self.wgen1_apply_btn, self.wgen2_apply_btn,
                   self.timebase_apply_btn, self.trigger_apply_btn,
-                  self.measure_btn, self.autoscale_btn, self.live_feed_start_btn,
-                  self.run_btn, self.stop_btn, self.single_btn]  # NEW: Acquisition control buttons
+                  self.measure_btn, self.autoscale_btn]  # NEW: Measurement buttons
         for btn in buttons:  # Iterate all operation buttons
             try:
                 btn.configure(state='normal')  # Enable button (clickable)
@@ -1377,7 +1004,7 @@ class EnhancedResponsiveAutomationGUI:
                     raise ValueError("VISA address empty")
                 self.oscilloscope = KeysightDSOX6004A(visa_address)  # Create oscilloscope instance
                 if self.oscilloscope.connect():  # Attempt connection
-                    self.data_acquisition = OscilloscopeDataAcquisition(self.oscilloscope, io_lock=self.io_lock)  # Initialize data handler with shared lock
+                    self.data_acquisition = OscilloscopeDataAcquisition(self.oscilloscope)  # Initialize data handler
                     info = self.oscilloscope.get_instrument_info()  # Query instrument identification
                     if info:
                         self.log_message(f"Connected: {info['manufacturer']} {info['model']}", "SUCCESS")
@@ -1393,8 +1020,6 @@ class EnhancedResponsiveAutomationGUI:
     def disconnect_oscilloscope(self):
         """Disconnect from oscilloscope and clean up resources."""
         try:
-            if hasattr(self, 'live_feed_active') and self.live_feed_active:
-                self.stop_live_feed()
             if self.oscilloscope:  # Check if oscilloscope exists
                 self.oscilloscope.disconnect()  # Close connection
                 self.oscilloscope = None  # Clear reference
@@ -1448,15 +1073,14 @@ class EnhancedResponsiveAutomationGUI:
                 if not (osc and osc.is_connected):
                     self.status_queue.put(("error", "Not connected"))
                     return
-                with self.io_lock:
-                    success = osc.configure_function_generator(
-                        generator=generator,  # Function generator number
-                        waveform=waveform,  # Waveform type
-                        frequency=frequency,  # Frequency in Hz
-                        amplitude=amplitude,  # Amplitude in Vpp
-                        offset=offset,  # DC offset in volts
-                        enable=enable  # Enable/disable output
-                    )
+                success = osc.configure_function_generator(
+                    generator=generator,  # Function generator number
+                    waveform=waveform,  # Waveform type
+                    frequency=frequency,  # Frequency in Hz
+                    amplitude=amplitude,  # Amplitude in Vpp
+                    offset=offset,  # DC offset in volts
+                    enable=enable  # Enable/disable output
+                )
                 if success:
                     self.status_queue.put(("wgen_configured", f"WGEN{generator} configured successfully"))
                 else:
@@ -1489,14 +1113,13 @@ class EnhancedResponsiveAutomationGUI:
                     if not (osc and osc.is_connected):
                         self.status_queue.put(("error", "Not connected"))
                         return
-                    with self.io_lock:
-                        success = osc.configure_channel(
-                            channel=channel,  # Channel number
-                            vertical_scale=v_scale,  # Vertical scale in V/div
-                            vertical_offset=v_offset,  # Vertical offset in volts
-                            coupling=coupling,  # AC or DC coupling
-                            probe_attenuation=probe  # Probe attenuation factor
-                        )
+                    success = osc.configure_channel(
+                        channel=channel,  # Channel number
+                        vertical_scale=v_scale,  # Vertical scale in V/div
+                        vertical_offset=v_offset,  # Vertical offset in volts
+                        coupling=coupling,  # AC or DC coupling
+                        probe_attenuation=probe  # Probe attenuation factor
+                    )
                     if success:
                         success_count += 1  # Increment success counter
                         self.log_message(f"Ch{channel} configured successfully", "SUCCESS")
@@ -1527,8 +1150,7 @@ class EnhancedResponsiveAutomationGUI:
                 if not (osc and osc.is_connected):
                     self.status_queue.put(("error", "Not connected"))
                     return
-                with self.io_lock:
-                    filename = osc.capture_screenshot()  # Call oscilloscope method
+                filename = osc.capture_screenshot()
                 if filename:  # Check if capture succeeded
                     original_path = Path(filename)  # Convert to Path object
                     if original_path.parent != screenshot_dir:  # Check if need to move file
@@ -1536,7 +1158,9 @@ class EnhancedResponsiveAutomationGUI:
                         import shutil
                         shutil.move(str(original_path), str(new_path))  # Move file to destination
                         filename = str(new_path)  # Update filename
-                self.status_queue.put(("screenshot_success", filename))
+                    self.status_queue.put(("screenshot_success", filename))
+                else:
+                    self.status_queue.put(("error", "Screenshot failed"))
             except Exception as e:
                 self.status_queue.put(("error", f"Screenshot error: {str(e)}"))
         if self.oscilloscope and self.oscilloscope.is_connected:  # Verify connection
@@ -1623,11 +1247,11 @@ class EnhancedResponsiveAutomationGUI:
             try:
                 self.update_status("Generating plot...")  # Update status
                 generated_plots = []  # List to store generated plot paths
-                custom_title = self.graph_title_var.get().strip() or None  # Get custom plot title
                 daq = self.data_acquisition
                 if not daq:
                     self.status_queue.put(("error", "Not connected"))
                     return
+                custom_title = self.graph_title_var.get().strip() or None  # Get custom plot title
                 if isinstance(self.last_acquired_data, dict) and 'channel' not in self.last_acquired_data:
                     # Multi-channel data: dictionary keyed by channel number
                     self.log_message(f"Generating plots for {len(self.last_acquired_data)} channel(s)...")
@@ -1672,8 +1296,7 @@ class EnhancedResponsiveAutomationGUI:
                 if not (osc and osc.is_connected and daq):
                     self.status_queue.put(("error", "Not connected"))
                     return
-                with self.io_lock:
-                    screenshot_file = osc.capture_screenshot()  # Capture display
+                screenshot_file = osc.capture_screenshot()  # Capture display
                 if screenshot_file:  # Move to user directory if needed
                     screenshot_dir = Path(self.screenshot_path_var.get())
                     screenshot_dir.mkdir(parents=True, exist_ok=True)
@@ -1873,18 +1496,6 @@ class EnhancedResponsiveAutomationGUI:
                     self.log_message(data, "SUCCESS")
                     self.update_status("Autoscale complete")
 
-                elif status_type == "run_complete":
-                    self.log_message(data, "SUCCESS")
-                    self.update_status("Acquisition running")
-
-                elif status_type == "stop_complete":
-                    self.log_message(data, "SUCCESS")
-                    self.update_status("Acquisition stopped")
-
-                elif status_type == "single_complete":
-                    self.log_message(data, "SUCCESS")
-                    self.update_status("Single trigger armed")
-
         except queue.Empty:  # No more messages in queue
             pass
         except Exception as e:
@@ -1905,8 +1516,7 @@ class EnhancedResponsiveAutomationGUI:
                 if not (osc and osc.is_connected):
                     self.status_queue.put(('error', 'Not connected'))
                     return
-                with self.io_lock:
-                    result = osc.measure_single(channel, measurement_type)
+                result = osc.measure_single(channel, measurement_type)
                 if result is not None:
                     formatted_result = self._format_measurement_result(measurement_type, result)
                     self.status_queue.put(('measurement_complete', {'channel': channel_str, 'type': measurement_type, 'value': result, 'formatted': formatted_result}))
@@ -1916,6 +1526,7 @@ class EnhancedResponsiveAutomationGUI:
                 self.log_message(f"Measurement error: {e}", "ERROR")
                 self.status_queue.put(('error', f"Measurement error: {e}"))
         threading.Thread(target=measure_task, daemon=True).start()
+
 
     def _format_measurement_result(self, meas_type: str, value: float) -> str:
         warning = ""
@@ -1938,8 +1549,7 @@ class EnhancedResponsiveAutomationGUI:
                     self.status_queue.put(('error', 'Not connected'))
                     self.root.after(0, lambda: self.autoscale_btn.config(state='normal'))
                     return
-                with self.io_lock:
-                    success = osc.autoscale()
+                success = osc.autoscale()
                 self.root.after(0, lambda: self.autoscale_btn.config(state='normal'))
                 if success:
                     self.status_queue.put(('autoscale_complete', 'Autoscale completed successfully'))
@@ -1951,87 +1561,12 @@ class EnhancedResponsiveAutomationGUI:
                 self.root.after(0, lambda: self.autoscale_btn.config(state='normal'))
         threading.Thread(target=autoscale_task, daemon=True).start()
 
-    def run_acquisition(self):
-        """Start continuous acquisition (RUN mode)."""
-        def run_task():
-            try:
-                self.log_message("Starting acquisition (RUN mode)...", "INFO")
-                self.update_status("Starting RUN...")
-                self.root.after(0, lambda: self.run_btn.config(state='disabled'))
-                osc = self.oscilloscope
-                if not (osc and osc.is_connected):
-                    self.status_queue.put(('error', 'Not connected'))
-                    self.root.after(0, lambda: self.run_btn.config(state='normal'))
-                    return
-                with self.io_lock:
-                    success = osc.run()
-                self.root.after(0, lambda: self.run_btn.config(state='normal'))
-                if success:
-                    self.status_queue.put(('run_complete', 'Acquisition started (RUN mode) ✓'))
-                else:
-                    self.status_queue.put(('error', 'Failed to start acquisition'))
-            except Exception as e:
-                self.log_message(f"RUN error: {e}", "ERROR")
-                self.status_queue.put(('error', f"RUN error: {e}"))
-                self.root.after(0, lambda: self.run_btn.config(state='normal'))
-        threading.Thread(target=run_task, daemon=True).start()
-
-    def stop_acquisition(self):
-        """Stop acquisition (STOP mode - freezes display)."""
-        def stop_task():
-            try:
-                self.log_message("Stopping acquisition (STOP mode)...", "INFO")
-                self.update_status("Stopping acquisition...")
-                self.root.after(0, lambda: self.stop_btn.config(state='disabled'))
-                osc = self.oscilloscope
-                if not (osc and osc.is_connected):
-                    self.status_queue.put(('error', 'Not connected'))
-                    self.root.after(0, lambda: self.stop_btn.config(state='normal'))
-                    return
-                with self.io_lock:
-                    success = osc.stop()
-                self.root.after(0, lambda: self.stop_btn.config(state='normal'))
-                if success:
-                    self.status_queue.put(('stop_complete', 'Acquisition stopped - Display frozen ⏹'))
-                else:
-                    self.status_queue.put(('error', 'Failed to stop acquisition'))
-            except Exception as e:
-                self.log_message(f"STOP error: {e}", "ERROR")
-                self.status_queue.put(('error', f"STOP error: {e}"))
-                self.root.after(0, lambda: self.stop_btn.config(state='normal'))
-        threading.Thread(target=stop_task, daemon=True).start()
-
-    def single_acquisition(self):
-        """Trigger single acquisition (SINGLE mode)."""
-        def single_task():
-            try:
-                self.log_message("Triggering single acquisition...", "INFO")
-                self.update_status("Waiting for trigger (SINGLE)...")
-                self.root.after(0, lambda: self.single_btn.config(state='disabled'))
-                osc = self.oscilloscope
-                if not (osc and osc.is_connected):
-                    self.status_queue.put(('error', 'Not connected'))
-                    self.root.after(0, lambda: self.single_btn.config(state='normal'))
-                    return
-                with self.io_lock:
-                    success = osc.single()
-                self.root.after(0, lambda: self.single_btn.config(state='normal'))
-                if success:
-                    self.status_queue.put(('single_complete', 'Single trigger armed - Waiting for trigger ⏯'))
-                else:
-                    self.status_queue.put(('error', 'Failed to arm single trigger'))
-            except Exception as e:
-                self.log_message(f"SINGLE error: {e}", "ERROR")
-                self.status_queue.put(('error', f"SINGLE error: {e}"))
-                self.root.after(0, lambda: self.single_btn.config(state='normal'))
-        threading.Thread(target=single_task, daemon=True).start()
-
     def run(self):
         """Start the application main event loop."""
         try:
             self.log_message("Keysight Oscilloscope Automation", "SUCCESS")
-            self.log_message("New Features: RUN/STOP/SINGLE controls + Long timebase fix", "SUCCESS")
-            self.log_message("Acquisition controls: ▶ RUN, ⏹ STOP, ⏯ SINGLE", "SUCCESS")
+            self.log_message("New Features: Timebase controls + Individual trigger levels", "SUCCESS")
+            self.log_message("All controls use methods from instrument_control module", "SUCCESS")
             self.log_message("Ready to connect to oscilloscope")
             self.root.mainloop()  # Start GUI event loop (blocks until window closed)
         except KeyboardInterrupt:  # User pressed Ctrl+C

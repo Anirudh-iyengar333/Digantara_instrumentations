@@ -41,7 +41,7 @@ import numpy as np
 # Configure matplotlib to handle large plots
 plt.rcParams['agg.path.chunksize'] = 10000
 plt.rcParams['path.simplify_threshold'] = 0.5
-script_dir = Path(__file__).resolve().parent.parent.parent
+script_dir = Path(__file__).resolve().parent.parent.parent.parent
 if str(script_dir) not in sys.path:
     sys.path.append(str(script_dir))
 # Import instrument control modules
