@@ -28,4 +28,6 @@ huggingface_hub>=0.25.2,<1.0.0  # Model and dataset hosting
 # Build and packaging (included for development environments)
 setuptools>=68.0.0
 wheel>=0.40.0
+# Scientific computing (for cross-correlation and statistics)
+scipy>=1.10.0
 # Note: pip should be managed by the Python environment, not requirements.txt
