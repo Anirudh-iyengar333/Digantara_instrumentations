@@ -8,8 +8,20 @@
 
 A comprehensive web-based automation framework providing unified control of precision laboratory test equipment through an intuitive browser interface. Designed for electronics testing, hardware validation, and research and development workflows.
 
-**Developed by:** Anirudh Iyengar  
+**Developed by:** Anirudh Iyengar
 **Organization:** Digantara Research and Technologies Pvt. Ltd.
+
+---
+
+## Recent Updates
+
+**Latest Version Features:**
+- **Tektronix MSO24 Oscilloscope Support**: Full integration with Tektronix MSO24 series oscilloscopes
+- **Continuous Trigger Capture**: Automated long-term oscilloscope trigger event monitoring
+- **Individual Functionality Modules**: Specialized modules for specific measurement tasks
+- **Enhanced Documentation**: Added INSTALLATION.md, QUICK_START.md, USAGE_WORKFLOWS.md, and DOCUMENTATION_INDEX.md
+- **Reorganized File Structure**: Improved organization of scripts with categorized subdirectories
+- **SciPy Integration**: Added scientific computing capabilities for advanced analysis
 
 ---
 
@@ -58,7 +70,7 @@ The Digantara Instrumentation Control Suite eliminates the complexity of laborat
 |----------|-------|--------------|-----------|
 | **Power Supply** | Keithley 2230-30-1 | 3-channel programmable DC PSU<br>30V/3A per channel<br>Waveform generation (Sine, Square, Triangle, Ramp) | USB/VISA |
 | **Digital Multimeter** | Keithley DMM6500<br>Keithley DMM7510 | 6.5/7.5-digit precision DMM<br>DC/AC V/I, 2W/4W resistance<br>Capacitance, frequency, temperature | USB/LAN/VISA |
-| **Oscilloscope** | Keysight DSOX6004A | 4-channel mixed signal scope<br>1 GHz bandwidth, 20 GSa/s<br>Advanced triggering and math | USB/LAN/VISA |
+| **Oscilloscope** | Keysight DSOX6004A<br>Tektronix MSO24 | Keysight: 4-channel mixed signal scope, 1 GHz bandwidth, 20 GSa/s<br>Tektronix: MSO24 series with advanced triggering and analysis | USB/LAN/VISA |
 
 ### Measurement Specifications
 
@@ -76,12 +88,19 @@ The Digantara Instrumentation Control Suite eliminates the complexity of laborat
 - **Resistance**: 1mΩ to 100MΩ (2-wire/4-wire)
 - **Additional**: Capacitance, frequency, temperature (thermocouple/RTD)
 
-#### Keysight Oscilloscope
+#### Keysight Oscilloscope (DSOX6004A)
 - **Bandwidth**: 1 GHz (4 analog channels)
 - **Sample Rate**: 20 GSa/s (single-shot), 4 GSa/s (all channels)
 - **Memory Depth**: Up to 4 Mpts per channel
 - **Triggering**: Edge, pulse width, pattern, serial bus
 - **Analysis**: FFT, math functions, automated measurements
+
+#### Tektronix Oscilloscope (MSO24)
+- **Channels**: 4 analog + 16 digital channels
+- **Bandwidth**: Up to 200 MHz - 2 GHz (model dependent)
+- **Sample Rate**: Up to 50 GSa/s
+- **Features**: Advanced triggering, waveform capture, screenshot capability
+- **Analysis**: Comprehensive measurement suite, math functions
 
 ---
 
@@ -100,6 +119,8 @@ The Digantara Instrumentation Control Suite eliminates the complexity of laborat
 - **Statistical Analysis**: Real-time mean, standard deviation, min/max, and trending
 - **Limit Testing**: Pass/fail evaluation with programmable thresholds
 - **Data Buffering**: High-speed capture with circular buffer management
+- **Continuous Trigger Capture**: Automated oscilloscope trigger capture for long-term monitoring
+- **Individual Functionality Modules**: Specialized modules for specific measurement tasks
 
 ### Automated Test Workflows
 
@@ -201,9 +222,14 @@ Digital Multimeter:
 python scripts\keithley\keithley_dmm_gradio_automation.py
 ```
 
-Oscilloscope:
+Oscilloscope (Keysight):
 ```bash
-python scripts\keysight\keysight_oscilloscope_gradio_en.py
+python "scripts\keysight\General GUI useage\keysight_oscilloscope_gradio_en.py"
+```
+
+Oscilloscope (Tektronix):
+```bash
+python scripts\tektronix\tektronix_oscilloscope_gradio_en.py
 ```
 
 #### Step 6: Access the Web Interface
@@ -688,6 +714,71 @@ The oscilloscope can automatically measure waveform parameters:
 
 ---
 
+### Tektronix Oscilloscope Operation (MSO24)
+
+The Tektronix MSO24 oscilloscope interface provides comprehensive waveform capture and analysis capabilities with advanced triggering.
+
+#### Basic MSO24 Workflow
+
+**1. Connect to Instrument**
+
+- **Connection Type**: USB or LAN
+  - USB: Enter VISA address
+  - LAN: Enter IP address
+- Click **"Connect"**
+- Instrument identification displays upon successful connection
+
+**2. Configure Channels**
+
+Similar to Keysight operation, configure vertical scale, offset, coupling, and probe attenuation for each channel.
+
+**3. Waveform Capture**
+
+- Select channel from dropdown
+- Click **"Acquire Waveform"** or **"Continuous Trigger Capture"** for automated long-term monitoring
+- Waveform data saved automatically to `trigger_captures/` folder
+
+**4. Screenshot Capability**
+
+- Click **"Capture Screenshot"**
+- High-resolution display image saved to configured output directory
+- Includes all on-screen measurements and waveform annotations
+
+**Advanced Features:**
+- **Continuous Trigger Capture**: Automated capture of triggered events over extended periods
+- **Enhanced Triggering**: Advanced trigger types including edge, pulse, logic, and bus triggers
+- **Deep Memory**: Extended record length for detailed waveform analysis
+
+---
+
+### Individual Functionality Modules
+
+For specialized measurement tasks, the platform provides individual functionality modules located in `scripts\keysight\Ind Functionality\`.
+
+**Continuous Trigger Capture:**
+
+The continuous trigger capture module enables automated long-term monitoring of oscilloscope trigger events.
+
+**Usage:**
+```bash
+python "scripts\keysight\Ind Functionality\continuous_trigger_capture.py"
+```
+
+**Features:**
+- Automated trigger event detection and capture
+- Configurable capture duration and file naming
+- Timestamped data logging
+- Background operation for unattended monitoring
+- Automatic file management in `trigger_captures/` directory
+
+**Use Cases:**
+- Long-term signal quality monitoring
+- Intermittent fault detection
+- Event logging for debugging
+- Automated test data collection
+
+---
+
 ## Architecture
 
 ### System Overview
@@ -703,19 +794,19 @@ The Digantara Instrumentation Control Suite follows a layered architecture patte
 ┌──────────────────────▼─────────────────────────────────────┐
 │              Gradio Application Server (Python)            │
 │  ┌────────────┬──────────────────┬──────────────────────┐  │
-│  │  DMM GUI   │   PSU GUI        │  Oscilloscope GUI    │  │
-│  │ Controller │   Controller     │   Controller         │  │
+│  │  DMM GUI   │   PSU GUI        │  Oscilloscope GUIs   │  │
+│  │ Controller │   Controller     │  (Keysight/Tektronix)│  │
 │  └──────┬─────┴─────┬────────────┴──────┬───────────────┘  │
 └─────────┼───────────┼───────────────────┼──────────────────┘
           │           │                   │
 ┌─────────▼───────────▼───────────────────▼──────────────────┐
 │            Instrument Driver Layer (Python Classes)        │
-│  ┌──────────────┬────────────────────┬──────────────────┐  │
-│  │ KeithleyDMM  │  KeithleyPSU       │  KeysightScope   │  │
-│  │ Class        │  Class             │  Class           │  │
-│  └──────┬───────┴──────┬─────────────┴──────┬───────────┘  │
-└─────────┼──────────────┼────────────────────┼──────────────┘
-          │              │                    │
+│  ┌──────────────┬────────────┬────────────┬─────────────┐  │
+│  │ KeithleyDMM  │ KeithleyPSU│ KeysightOsc│TektronixOsc │  │
+│  │ Class        │ Class      │ Class      │ Class       │  │
+│  └──────┬───────┴──────┬─────┴──────┬─────┴──────┬──────┘  │
+└─────────┼──────────────┼────────────┼────────────┼─────────┘
+          │              │            │            │
 ┌─────────▼──────────────▼────────────────────▼──────────────┐
 │              PyVISA Communication Layer                    │
 │         (SCPI Command Translation & Error Handling)        │
@@ -733,7 +824,7 @@ The Digantara Instrumentation Control Suite follows a layered architecture patte
                        │
 ┌──────────────────────▼──────────────────────────────────────┐
 │                Physical Instruments                         │
-│        (Keithley PSU, DMM, Keysight Oscilloscope)           │
+│   (Keithley PSU, DMM, Keysight/Tektronix Oscilloscopes)    │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -799,6 +890,7 @@ Digantara_instrumentation/
 │   ├── keithley_dmm.py                 # DMM6500/7510 driver
 │   ├── keithley_power_supply.py        # 2230-30-1 PSU driver
 │   ├── keysight_oscilloscope.py        # DSOX6004A oscilloscope driver
+│   ├── tektronix_oscilloscope.py       # MSO24 oscilloscope driver
 │   └── scpi_wrapper.py                 # Base SCPI communication class
 │
 ├── scripts/                            # Individual instrument GUIs
@@ -806,11 +898,19 @@ Digantara_instrumentation/
 │   │   ├── keithley_PSU_gradio_automation.py     # PSU standalone GUI
 │   │   ├── keithley_dmm_gradio_automation.py     # DMM standalone GUI
 │   │   └── keithley_power_supply_automation.py   # Legacy PSU interface
-│   └── keysight/
-│       ├── keysight_oscilloscope_gradio_en.py    # Oscilloscope GUI (Enhanced)
-│       ├── keysight_oscilloscope_gradio.py       # Oscilloscope GUI (minimal)
-│       ├── keysight_oscilloscope_main.py         # Oscilloscope main interface
-│       └── keysight_oscilloscope_main_with_livefeed.py  # With live waveform
+│   ├── keysight/
+│   │   ├── General GUI useage/                   # General purpose interfaces
+│   │   │   ├── keysight_oscilloscope_gradio_en.py      # Enhanced GUI
+│   │   │   ├── keysight_oscilloscope_gradio.py         # Basic GUI
+│   │   │   ├── keysight_oscilloscope_main.py           # Main interface
+│   │   │   └── keysight_oscilloscope_main_with_livefeed.py  # Live waveform
+│   │   └── Ind Functionality/                    # Individual functionality modules
+│   │       └── continuous_trigger_capture.py     # Continuous trigger capture
+│   └── tektronix/
+│       └── tektronix_oscilloscope_gradio_en.py   # MSO24 GUI interface
+│
+├── config/                             # Configuration files and settings
+├── trigger_captures/                   # Trigger capture data storage
 │
 ├── requirements.txt                    # Python package dependencies
 ├── setup.py                            # Package installation configuration
@@ -819,7 +919,8 @@ Digantara_instrumentation/
 ├── INSTALLATION.md                     # Detailed installation guide
 ├── QUICK_START.md                      # Quick start tutorial
 ├── USAGE_WORKFLOWS.md                  # Common usage scenarios
-└── DOCUMENTATION_INDEX.md              # Documentation navigation
+├── DOCUMENTATION_INDEX.md              # Documentation navigation
+└── Test_Equipment_Control_Work_Instructions.pdf  # Work instructions
 ```
 
 ---
@@ -917,9 +1018,11 @@ All exported files follow consistent timestamp-based naming:
 |------------|-----------|------------------|
 | Power Supply | Waveform data | `voltage_ramp_data/` |
 | DMM | Measurements | Current working directory |
-| Oscilloscope | Waveforms | `outputs/` |
-| Oscilloscope | Screenshots | `outputs/` |
-| All | Configuration files | `.config/` |
+| Keysight Oscilloscope | Waveforms | `outputs/` |
+| Keysight Oscilloscope | Screenshots | `outputs/` |
+| Tektronix Oscilloscope | Trigger captures | `trigger_captures/` |
+| Tektronix Oscilloscope | Screenshots | Configured output directory |
+| All | Configuration files | `config/` |
 
 **Customizing Storage Locations:**
 
@@ -1376,6 +1479,10 @@ interface.launch(
   - [User Guide](https://www.keysight.com/us/en/product/DSOX6004A)
   - [Programming Guide](https://www.keysight.com/us/en/product/DSOX6004A)
 
+- **Tektronix MSO24**
+  - [User Manual](https://www.tek.com/en/products/oscilloscopes/mso24)
+  - [Programming Manual](https://www.tek.com/en/products/oscilloscopes/mso24)
+
 **Software Documentation:**
 
 - [PyVISA Documentation](https://pyvisa.readthedocs.io/)
@@ -1453,8 +1560,8 @@ Suggestions for improvements are welcome! Contact the development team with:
 ## License and Credits
 
 **Project**: Digantara Instrumentation Control Suite
-**Version**: 1.0.0
-**Release Date**: 2025-11-18
+**Version**: 1.1.0
+**Release Date**: 2025-12-23
 **Status**: Production Ready
 
 **Lead Developer**: Anirudh Iyengar
@@ -1493,13 +1600,16 @@ This software incorporates the following open-source libraries:
 | Library | Version | License | Purpose |
 |---------|---------|---------|---------|
 | **PyVISA** | ≥1.13.0 | MIT | Instrument communication |
+| **PyVISA-py** | ≥0.7.2 | MIT | Pure Python VISA backend |
 | **Gradio** | ≥4.0.0 | Apache 2.0 | Web interface framework |
 | **NumPy** | ≥2.0.0 | BSD | Numerical computing |
 | **Pandas** | ≥2.2.0 | BSD | Data manipulation |
+| **SciPy** | ≥1.10.0 | BSD | Scientific computing and statistics |
 | **Matplotlib** | ≥3.8.0 | PSF | Visualization and plotting |
 | **Pillow** | ≥10.0.0 | PIL | Image processing |
 | **PySerial** | ≥3.5 | BSD | Serial communication |
 | **PyUSB** | ≥1.2.1 | BSD | USB device access |
+| **Huggingface Hub** | ≥0.25.2 | Apache 2.0 | Model and dataset hosting |
 
 See [requirements.txt](requirements.txt) for complete dependency list.
 
@@ -1507,6 +1617,7 @@ See [requirements.txt](requirements.txt) for complete dependency list.
 
 Special thanks to:
 - Tektronix/Keithley for instrument documentation and SCPI command references
+- Tektronix for MSO24 oscilloscope programming guides and technical support
 - Keysight Technologies for oscilloscope programming guides
 - PyVISA development team for excellent communication library
 - Gradio team for intuitive web framework
@@ -1530,7 +1641,8 @@ Special thanks to:
 
 ---
 
-**Document Version**: 1.0
-**For Software Version**: 1.0.0
+**Document Version**: 1.1
+**For Software Version**: 1.1.0
+**Last Updated**: 2025-12-23
 
 For the latest documentation and updates, contact Digantara Research and Technologies.
