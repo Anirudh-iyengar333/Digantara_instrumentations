@@ -1643,6 +1643,5 @@ Special thanks to:
 
 **Document Version**: 1.1
 **For Software Version**: 1.1.0
-**Last Updated**: 2025-12-23
 
 For the latest documentation and updates, contact Digantara Research and Technologies.
