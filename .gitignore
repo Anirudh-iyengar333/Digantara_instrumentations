@@ -32,6 +32,11 @@ ENV/
 *.swo
 .DS_Store
 
+# Assets (logos, images, etc.)
+assets/
+
+#claude
+.claude/
 # Logs
 *.log
 
