@@ -152,6 +152,62 @@ class KeysightDSOX6004A:
             self._logger.error(f"Failed to configure channel {channel}: {e}")
             return False
 
+    def enable_channel(self, channel: int) -> bool:
+        """
+        Enable (turn on) a channel for display and acquisition
+
+        ✓ VERIFIED: :CHANnel:DISPlay command from manual page 347
+
+        Args:
+            channel: Channel number (1-4)
+
+        Returns:
+            bool: True if successful
+        """
+        if not self.is_connected:
+            self._logger.error("Cannot enable channel: oscilloscope not connected")
+            return False
+
+        if not (1 <= channel <= self.max_channels):
+            self._logger.error(f"Invalid channel: {channel}")
+            return False
+
+        try:
+            self._scpi_wrapper.write(f":CHANnel{channel}:DISPlay ON")
+            self._logger.debug(f"Channel {channel} enabled")
+            return True
+        except Exception as e:
+            self._logger.error(f"Failed to enable channel {channel}: {type(e).__name__}: {e}")
+            return False
+
+    def disable_channel(self, channel: int) -> bool:
+        """
+        Disable (turn off) a channel from display and acquisition
+
+        ✓ VERIFIED: :CHANnel:DISPlay command from manual page 347
+
+        Args:
+            channel: Channel number (1-4)
+
+        Returns:
+            bool: True if successful
+        """
+        if not self.is_connected:
+            self._logger.error("Cannot disable channel: oscilloscope not connected")
+            return False
+
+        if not (1 <= channel <= self.max_channels):
+            self._logger.error(f"Invalid channel: {channel}")
+            return False
+
+        try:
+            self._scpi_wrapper.write(f":CHANnel{channel}:DISPlay OFF")
+            self._logger.debug(f"Channel {channel} disabled")
+            return True
+        except Exception as e:
+            self._logger.error(f"Failed to disable channel {channel}: {type(e).__name__}: {e}")
+            return False
+
     def configure_timebase(self, time_scale: float, time_offset: float = 0.0) -> bool:
         """
         Configure horizontal timebase settings
@@ -1799,6 +1855,264 @@ class KeysightDSOX6004A:
                 except Exception as resume_error:
                     self._logger.error(f"Failed to resume acquisition: {resume_error}")
 
+            return None
+
+    def get_operation_register(self) -> Optional[int]:
+        """
+        Get operation register status
+
+        ✓ VERIFIED: :OPERegister:CONDition? command from manual
+
+        Returns:
+            int: Operation register value, or None if error
+
+        Note: Bit 3 (value 8) indicates "Run" status
+              When bit 3 is 0, acquisition is complete/stopped
+        """
+        if not self.is_connected:
+            self._logger.error("Cannot get operation register: oscilloscope not connected")
+            return None
+
+        try:
+            status = self._scpi_wrapper.query(":OPERegister:CONDition?").strip()
+            return int(status)
+        except Exception as e:
+            self._logger.error(f"Failed to get operation register: {type(e).__name__}: {e}")
+            return None
+
+    def wait_for_trigger_complete(self, timeout: float = 10.0) -> bool:
+        """
+        Wait for trigger and acquisition to complete using operation register
+
+        This method is more reliable than wait_for_trigger() as it uses the
+        operation register to check if acquisition is truly complete.
+
+        Args:
+            timeout: Maximum wait time in seconds
+
+        Returns:
+            bool: True if acquisition completed, False if timeout
+        """
+        if not self.is_connected:
+            self._logger.error("Cannot wait for trigger: oscilloscope not connected")
+            return False
+
+        start_time = time.time()
+        try:
+            while time.time() - start_time < timeout:
+                # Query operation register - Bit 3 (value 8) = Run status
+                # When bit 3 is 0, acquisition is complete
+                oper_status = self.get_operation_register()
+                if oper_status is not None and (oper_status & 8) == 0:
+                    self._logger.info("Trigger acquisition complete")
+                    return True
+                time.sleep(0.1)
+
+            self._logger.warning(f"Trigger timeout after {timeout}s")
+            return False
+        except Exception as e:
+            self._logger.error(f"Failed waiting for trigger: {type(e).__name__}: {e}")
+            return False
+
+    def get_waveform_preamble(self, channel: int) -> Optional[Dict[str, Any]]:
+        """
+        Get waveform preamble with scaling information
+
+        ✓ VERIFIED: :WAVeform:PREamble? command from manual page 1158
+
+        Args:
+            channel: Channel number (1-4)
+
+        Returns:
+            dict: Dictionary with waveform scaling parameters, or None if error
+                - format: Data format
+                - type: Acquisition type
+                - points: Number of points
+                - count: Average count
+                - x_increment: Time increment per point (s)
+                - x_origin: Time origin (s)
+                - x_reference: Time reference point
+                - y_increment: Voltage increment per bit (V)
+                - y_origin: Voltage origin (V)
+                - y_reference: Voltage reference level
+        """
+        if not self.is_connected:
+            self._logger.error("Cannot get waveform preamble: oscilloscope not connected")
+            return None
+
+        if not (1 <= channel <= self.max_channels):
+            self._logger.error(f"Invalid channel: {channel}")
+            return None
+
+        try:
+            # Set waveform source
+            self._scpi_wrapper.write(f":WAVeform:SOURce CHANnel{channel}")
+            time.sleep(0.05)
+
+            # Query preamble
+            preamble = self._scpi_wrapper.query(":WAVeform:PREamble?").strip()
+            parts = preamble.split(',')
+
+            if len(parts) >= 10:
+                return {
+                    'format': int(parts[0]),
+                    'type': int(parts[1]),
+                    'points': int(parts[2]),
+                    'count': int(parts[3]),
+                    'x_increment': float(parts[4]),
+                    'x_origin': float(parts[5]),
+                    'x_reference': float(parts[6]),
+                    'y_increment': float(parts[7]),
+                    'y_origin': float(parts[8]),
+                    'y_reference': float(parts[9])
+                }
+            else:
+                self._logger.error(f"Incomplete preamble data: {preamble}")
+                return None
+
+        except Exception as e:
+            self._logger.error(f"Failed to get waveform preamble: {type(e).__name__}: {e}")
+            return None
+
+    def set_waveform_format(self, format_type: str = "BYTE") -> bool:
+        """
+        Set waveform data format
+
+        ✓ VERIFIED: :WAVeform:FORMat command from manual page 1156
+
+        Args:
+            format_type: "BYTE", "WORD", or "ASCii"
+
+        Returns:
+            bool: True if successful
+        """
+        if not self.is_connected:
+            self._logger.error("Cannot set waveform format: oscilloscope not connected")
+            return False
+
+        valid_formats = ["BYTE", "WORD", "ASCii"]
+        if format_type not in valid_formats:
+            self._logger.error(f"Invalid format: {format_type}. Must be one of {valid_formats}")
+            return False
+
+        try:
+            self._scpi_wrapper.write(f":WAVeform:FORMat {format_type}")
+            self._logger.debug(f"Waveform format set to {format_type}")
+            return True
+        except Exception as e:
+            self._logger.error(f"Failed to set waveform format: {type(e).__name__}: {e}")
+            return False
+
+    def set_waveform_source(self, channel: int) -> bool:
+        """
+        Set waveform data source channel
+
+        ✓ VERIFIED: :WAVeform:SOURce command from manual page 1201
+
+        Args:
+            channel: Channel number (1-4)
+
+        Returns:
+            bool: True if successful
+        """
+        if not self.is_connected:
+            self._logger.error("Cannot set waveform source: oscilloscope not connected")
+            return False
+
+        if not (1 <= channel <= self.max_channels):
+            self._logger.error(f"Invalid channel: {channel}")
+            return False
+
+        try:
+            self._scpi_wrapper.write(f":WAVeform:SOURce CHANnel{channel}")
+            self._logger.debug(f"Waveform source set to CH{channel}")
+            return True
+        except Exception as e:
+            self._logger.error(f"Failed to set waveform source: {type(e).__name__}: {e}")
+            return False
+
+    def set_waveform_points(self, points: int) -> bool:
+        """
+        Set number of waveform points to transfer
+
+        ✓ VERIFIED: :WAVeform:POINts command from manual page 1160
+
+        Args:
+            points: Number of points (typically 100 to 62500)
+
+        Returns:
+            bool: True if successful
+        """
+        if not self.is_connected:
+            self._logger.error("Cannot set waveform points: oscilloscope not connected")
+            return False
+
+        try:
+            self._scpi_wrapper.write(f":WAVeform:POINts {points}")
+            self._logger.debug(f"Waveform points set to {points}")
+            return True
+        except Exception as e:
+            self._logger.error(f"Failed to set waveform points: {type(e).__name__}: {e}")
+            return False
+
+    def get_waveform_raw_data(self) -> Optional[List[int]]:
+        """
+        Get raw waveform data from currently configured source
+
+        ✓ VERIFIED: :WAVeform:DATA? command from manual page 1150
+
+        Note: Use set_waveform_source() and set_waveform_format() first
+
+        Returns:
+            list: Raw waveform data bytes, or None if error
+        """
+        if not self.is_connected:
+            self._logger.error("Cannot get waveform data: oscilloscope not connected")
+            return None
+
+        try:
+            data = self._scpi_wrapper.query_binary_values(":WAVeform:DATA?", datatype='B')
+            if data:
+                self._logger.debug(f"Retrieved {len(data)} waveform points")
+                return data
+            return None
+        except Exception as e:
+            self._logger.error(f"Failed to get waveform data: {type(e).__name__}: {e}")
+            return None
+
+    def get_screenshot_binary(self, image_format: str = "PNG") -> Optional[bytes]:
+        """
+        Get screenshot as binary data without saving to file
+
+        ✓ VERIFIED: :DISPlay:DATA? command from manual page 424
+
+        Args:
+            image_format: "PNG", "BMP", or "BMP8bit"
+
+        Returns:
+            bytes: Screenshot image data, or None if error
+        """
+        if not self.is_connected:
+            self._logger.error("Cannot get screenshot: oscilloscope not connected")
+            return None
+
+        valid_formats = ["PNG", "BMP", "BMP8bit"]
+        if image_format not in valid_formats:
+            self._logger.error(f"Invalid format: {image_format}. Must be one of {valid_formats}")
+            return None
+
+        try:
+            self._logger.debug(f"Capturing screenshot in {image_format} format")
+            image_data = self._scpi_wrapper.query_binary_values(
+                f":DISPlay:DATA? {image_format}",
+                datatype='B'
+            )
+
+            if image_data:
+                return bytes(image_data)
+            return None
+        except Exception as e:
+            self._logger.error(f"Failed to get screenshot: {type(e).__name__}: {e}")
             return None
 
     def setup_output_directories(self) -> None:

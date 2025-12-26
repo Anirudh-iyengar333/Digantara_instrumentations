@@ -47,13 +47,13 @@ Date: 2025-11-06
 # =============================================================================
 
 # CSV data files location (waveform data exports)
-KEYSIGHT_CSV_DATA_PATH = r"C:\Users\AnirudhIyengar\Desktop\keysight_oscilloscope_data"
+KEYSIGHT_CSV_DATA_PATH = r"C:\Users\AnirudhIyengar\Desktop\oscilloscope_data"
 
 # Graph/plot images location (PNG files)
-KEYSIGHT_GRAPH_PATH = r"C:\Users\AnirudhIyengar\Desktop\keysight_oscilloscope_graphs"
+KEYSIGHT_GRAPH_PATH = r"C:\Users\AnirudhIyengar\Desktop\oscilloscope_graphs"
 
 # Screenshot images location (oscilloscope screen captures)
-KEYSIGHT_SCREENSHOT_PATH = r"C:\Users\AnirudhIyengar\Desktop\keysight_oscilloscope_screenshots"
+KEYSIGHT_SCREENSHOT_PATH = r"C:\Users\AnirudhIyengar\Desktop\oscilloscope_screenshots"
 
 # =============================================================================
 # END OF CONFIGURATION - DO NOT EDIT BELOW THIS LINE

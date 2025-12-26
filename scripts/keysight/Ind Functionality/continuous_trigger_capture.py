@@ -425,19 +425,19 @@ class TriggerCaptureEngine:
             config: Capture configuration
         """
         try:
-            # Stop any ongoing acquisition
-            self.scope._scpi_wrapper.write(":STOP")
+            # Stop any ongoing acquisition using driver method
+            self.scope.stop()
             time.sleep(0.1)  # Brief pause for command to take effect
 
-            # Set acquisition type to normal (standard mode)
-            self.scope._scpi_wrapper.write(":ACQuire:TYPE NORMal")
+            # Set acquisition type to normal (standard mode) using driver method
+            self.scope.set_acquire_type("NORMal")
 
             # Enable selected channels (turn them on for display and capture)
             for channel in config.channels:
-                self.scope._scpi_wrapper.write(f":CHANnel{channel}:DISPlay ON")
+                self.scope.enable_channel(channel)
 
             # Set trigger sweep to NORMAL (wait for valid trigger before acquiring)
-            self.scope._scpi_wrapper.write(":TRIGger:SWEep NORMal")
+            self.scope.set_trigger_sweep("NORMal")
 
             self.logger.info("Oscilloscope configured for single trigger capture")
 
@@ -475,12 +475,12 @@ class TriggerCaptureEngine:
         )
 
         try:
-            # Step 1: Set to SINGLE mode and arm trigger
+            # Step 1: Set to SINGLE mode and arm trigger using driver method
             self.logger.debug("Setting SINGLE mode and waiting for trigger...")
-            self.scope._scpi_wrapper.write(":SINGle")
+            self.scope.single()
 
-            # Step 2: Wait for trigger to occur (with timeout)
-            trigger_acquired = self._wait_for_trigger(config.trigger_timeout)
+            # Step 2: Wait for trigger to occur (with timeout) using driver method
+            trigger_acquired = self.scope.wait_for_trigger_complete(config.trigger_timeout)
 
             if not trigger_acquired:
                 result.success = False
@@ -533,27 +533,10 @@ class TriggerCaptureEngine:
 
         Returns:
             True if trigger occurred, False if timeout
+
+        Note: This method is now a wrapper around the driver's wait_for_trigger_complete()
         """
-        start_time = time.time()
-
-        while time.time() - start_time < timeout:
-            try:
-                # Query the operation status register
-                # This tells us if the oscilloscope is currently acquiring
-                oper_status = self.scope._scpi_wrapper.query(":OPERegister:CONDition?")
-
-                # Bit 3 (value 8) indicates "Run" status
-                # When this bit is 0, the acquisition is complete (trigger happened)
-                if int(oper_status) & 8 == 0:
-                    return True  # Trigger acquired!
-
-                time.sleep(0.1)  # Check every 100ms
-
-            except Exception as e:
-                self.logger.warning(f"Error checking trigger status: {e}")
-                time.sleep(0.1)
-
-        return False  # Timeout - no trigger detected
+        return self.scope.wait_for_trigger_complete(timeout)
 
     def _capture_screenshot(self, config: CaptureConfig, capture_idx: int,
                           timestamp: datetime) -> Optional[str]:
@@ -564,7 +547,7 @@ class TriggerCaptureEngine:
 
         Process:
         1. Generate unique filename with timestamp
-        2. Request screenshot data from oscilloscope
+        2. Request screenshot data from oscilloscope using driver method
         3. Save as PNG file
 
         Parameters:
@@ -581,17 +564,14 @@ class TriggerCaptureEngine:
             filename = f"{config.base_filename}_screenshot_{capture_idx:04d}_{timestamp_str}.png"
             filepath = Path(config.save_directory) / filename
 
-            # Request screenshot data from oscilloscope in PNG format
+            # Request screenshot data from oscilloscope using driver method
             self.logger.debug("Capturing screenshot...")
-            image_data = self.scope._scpi_wrapper.query_binary_values(
-                ":DISPlay:DATA? PNG",  # Command to get display as PNG
-                datatype='B'           # Binary data type
-            )
+            image_data = self.scope.get_screenshot_binary(image_format="PNG")
 
             if image_data:
                 # Save the binary image data to file
                 with open(filepath, 'wb') as f:
-                    f.write(bytes(image_data))
+                    f.write(image_data)
                 return str(filepath)
             else:
                 self.logger.warning("No screenshot data received")
@@ -627,29 +607,29 @@ class TriggerCaptureEngine:
         # Loop through each selected channel
         for channel in config.channels:
             try:
-                # Configure oscilloscope for waveform export
-                self.scope._scpi_wrapper.write(f":WAVeform:SOURce CHANnel{channel}")
-                self.scope._scpi_wrapper.write(":WAVeform:FORMat BYTE")
-                self.scope._scpi_wrapper.write(":WAVeform:POINts:MODE RAW")
-                self.scope._scpi_wrapper.write(":WAVeform:POINts 62500")  # Maximum points
+                # Configure oscilloscope for waveform export using driver methods
+                self.scope.set_waveform_source(channel)
+                self.scope.set_waveform_format("BYTE")
+                self.scope.set_waveform_points_mode("RAW")
+                self.scope.set_waveform_points(62500)  # Maximum points
 
-                # Get waveform preamble (contains scaling information)
-                preamble = self.scope._scpi_wrapper.query(":WAVeform:PREamble?")
-                preamble_parts = preamble.split(',')
+                # Get waveform preamble (contains scaling information) using driver method
+                preamble_dict = self.scope.get_waveform_preamble(channel)
 
-                # Extract scaling factors from preamble
+                if not preamble_dict:
+                    self.logger.error(f"Failed to get preamble for channel {channel}")
+                    continue
+
+                # Extract scaling factors from preamble dictionary
                 # These convert raw byte values to actual voltage/time values
-                y_increment = float(preamble_parts[7])  # Volts per bit
-                y_origin = float(preamble_parts[8])     # Voltage offset
-                y_reference = float(preamble_parts[9])  # Reference level
-                x_increment = float(preamble_parts[4])  # Seconds per point
-                x_origin = float(preamble_parts[5])     # Time offset
+                y_increment = preamble_dict['y_increment']  # Volts per bit
+                y_origin = preamble_dict['y_origin']        # Voltage offset
+                y_reference = preamble_dict['y_reference']  # Reference level
+                x_increment = preamble_dict['x_increment']  # Seconds per point
+                x_origin = preamble_dict['x_origin']        # Time offset
 
-                # Get raw waveform data (as bytes)
-                raw_data = self.scope._scpi_wrapper.query_binary_values(
-                    ":WAVeform:DATA?",
-                    datatype='B'
-                )
+                # Get raw waveform data using driver method
+                raw_data = self.scope.get_waveform_raw_data()
 
                 # Convert raw bytes to actual voltage values
                 voltage_data = [(val - y_reference) * y_increment + y_origin for val in raw_data]
@@ -1009,9 +989,9 @@ class TriggerCaptureGUI:
                     except Exception as e:
                         self.logger.error(f"Failed to configure channel {channel}: {e}")
                 else:
-                    # Disable unchecked channels
+                    # Disable unchecked channels using driver method
                     try:
-                        self.oscilloscope._scpi_wrapper.write(f":CHANnel{channel}:DISPlay OFF")
+                        self.oscilloscope.disable_channel(channel)
                         disabled_count += 1
                     except Exception as e:
                         self.logger.warning(f"Failed to disable channel {channel}: {e}")
@@ -1330,15 +1310,22 @@ class TriggerCaptureGUI:
         try:
             channel = int(source.replace("CH", ""))
 
-            # Set trigger parameters
-            self.oscilloscope._scpi_wrapper.write(f":TRIGger:EDGE:SOURce CHANnel{channel}")
-            self.oscilloscope._scpi_wrapper.write(f":TRIGger:EDGE:LEVel {level}")
-
+            # Map slope to SCPI format
             slope_map = {"Rising": "POS", "Falling": "NEG", "Either": "EITH"}
-            self.oscilloscope._scpi_wrapper.write(f":TRIGger:EDGE:SLOPe {slope_map[slope]}")
+            slope_scpi = slope_map.get(slope, "POS")
 
-            # Set to NORMAL mode for stable triggering
-            self.oscilloscope._scpi_wrapper.write(":TRIGger:SWEep NORMal")
+            # Set trigger parameters using driver method
+            success = self.oscilloscope.configure_trigger(
+                channel=channel,
+                trigger_level=level,
+                trigger_slope=slope_scpi
+            )
+
+            if not success:
+                return "Failed to configure trigger"
+
+            # Set to NORMAL mode for stable triggering using driver method
+            self.oscilloscope.set_trigger_sweep("NORMal")
 
             return f"Trigger configured: {source} @ {level} V, {slope}"
 
@@ -1372,9 +1359,13 @@ class TriggerCaptureGUI:
             return "Error: Not connected"
 
         try:
-            self.oscilloscope._scpi_wrapper.write(":AUToscale")
-            time.sleep(3)  # Wait for autoscale to complete
-            return "Autoscale completed"
+            # Use driver method for autoscale
+            success = self.oscilloscope.autoscale()
+            if success:
+                time.sleep(3)  # Wait for autoscale to complete
+                return "Autoscale completed"
+            else:
+                return "Autoscale failed"
         except Exception as e:
             return f"Error: {str(e)}"
 
