@@ -114,9 +114,9 @@ PSU_DATA_PATH = r"C:\Users\AnirudhIyengar\Desktop\psu_data"
 PSU_WAVEFORM_PATH = r"C:\Users\AnirudhIyengar\Desktop\psu_waveforms"
 
 # Oscilloscope data export paths
-OSC_DATA_PATH = r"C:\Users\AnirudhIyengar\Downloads\test\Data"
-OSC_GRAPH_PATH = r"C:\Users\AnirudhIyengar\Downloads\test\Graphs"
-OSC_SCREENSHOT_PATH = r"C:\Users\AnirudhIyengar\Downloads\test\Screenshots"
+OSC_DATA_PATH = r"C:\Users\AnirudhIyengar\Desktop\oscilloscope_data"
+OSC_GRAPH_PATH = r"C:\Users\AnirudhIyengar\Desktop\oscilloscope_graphs"
+OSC_SCREENSHOT_PATH = r"C:\Users\AnirudhIyengar\Desktop\oscilloscope_screenshots"
 
 # =============================================================================
 # END OF CONFIGURATION - DO NOT EDIT BELOW THIS LINE
@@ -469,10 +469,9 @@ class DMM_GUI_Controller:
         # ────────────────────────────────────────────────────────────────────
         # File Export Default Locations
         # ────────────────────────────────────────────────────────────────────
-        # Use the configured paths from the top of the file
         self.save_locations = {
-            'data': DMM_DATA_PATH,      # CSV/JSON/Excel exports
-            'graphs': DMM_PLOT_PATH     # PNG plot files
+            'data': str(Path.cwd() / "dmm_data"),      # CSV/JSON/Excel exports
+            'graphs': str(Path.cwd() / "dmm_graphs")   # PNG plot files
         }
         # Note: Directories created on-demand during export operations
 
@@ -1284,26 +1283,30 @@ class DMM_GUI_Controller:
         scaled_value = value / 1e-15                # Scale to femto range
         return f"{scaled_value:.4f} f{base_unit}"   # Format with femto prefix
 
-    def export_data(self, save_path: str, format_type: str = "CSV"):
-        """Export measurement data to file and return path for download.
+    def export_data(self, save_path: str, format_type: str = "CSV") -> str:
+        """Export measurement data to file at user-specified location.
 
         Args:
             save_path: Directory path where file should be saved
             format_type: Export format (CSV, JSON, or Excel)
 
         Returns:
-            Tuple of (status_message, file_path)
+            Status message
         """
         if not self.measurement_data:
-            return "No data to export", None
+            return "No data to export"
 
         if not save_path or save_path.strip() == "":
-            return "Error: No save location specified", None
+            return "Please select a save location using the Browse button"
 
         try:
             # Ensure the save directory exists
             save_dir = Path(save_path)
-            save_dir.mkdir(parents=True, exist_ok=True)
+            if not save_dir.exists():
+                return f"Error: Directory does not exist: {save_path}"
+
+            if not save_dir.is_dir():
+                return f"Error: Path is not a directory: {save_path}"
 
             df = pd.DataFrame(self.measurement_data)
             timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S");
@@ -1312,47 +1315,51 @@ class DMM_GUI_Controller:
                 filename = f"dmm_data_{timestamp_str}.csv"
                 filepath = save_dir / filename
                 df.to_csv(filepath, index=False)
-                return f"✓ Data exported successfully to:\n{filepath}", str(filepath)
+                return f"✓ Data exported successfully to:\n{filepath}"
             elif format_type == "JSON":
                 filename = f"dmm_data_{timestamp_str}.json"
                 filepath = save_dir / filename
                 df.to_json(filepath, orient='records', date_format='iso')
-                return f"✓ Data exported successfully to:\n{filepath}", str(filepath)
+                return f"✓ Data exported successfully to:\n{filepath}"
             elif format_type == "Excel":
                 filename = f"dmm_data_{timestamp_str}.xlsx"
                 filepath = save_dir / filename
                 df.to_excel(filepath, index=False)
-                return f"✓ Data exported successfully to:\n{filepath}", str(filepath)
+                return f"✓ Data exported successfully to:\n{filepath}"
         except Exception as e:
             self.logger.error(f"Data export error: {e}")
-            return f"Export failed: {str(e)}", None
+            return f"Export failed: {str(e)}"
 
-    def save_trend_plot(self, save_path: str, last_n_points: int = 100):
-        """Save trend plot to file and return path for download.
+    def save_trend_plot(self, save_path: str, last_n_points: int = 100) -> str:
+        """Save trend plot to file at user-specified location.
 
         Args:
             save_path: Directory path where plot should be saved
             last_n_points: Number of recent points to plot
 
         Returns:
-            Tuple of (status_message, file_path)
+            Status message
         """
         if not self.measurement_data:
-            return "No data to plot", None
+            return "No data to plot"
 
         if not save_path or save_path.strip() == "":
-            return "Error: No save location specified", None
+            return "Please select a save location using the Browse button"
 
         try:
             # Ensure the save directory exists
             save_dir = Path(save_path)
-            save_dir.mkdir(parents=True, exist_ok=True)
+            if not save_dir.exists():
+                return f"Error: Directory does not exist: {save_path}"
+
+            if not save_dir.is_dir():
+                return f"Error: Path is not a directory: {save_path}"
 
             # Get recent data points
             recent_data = self.measurement_data[-last_n_points:] if len(self.measurement_data) > last_n_points else self.measurement_data
 
             if len(recent_data) < 2:
-                return "Insufficient data points for plot (need at least 2)", None
+                return "Insufficient data points for plot (need at least 2)"
 
             timestamps = [point['timestamp'] for point in recent_data]
             values = [point['value'] for point in recent_data]
@@ -1380,10 +1387,10 @@ class DMM_GUI_Controller:
             plt.savefig(filepath, dpi=1200, bbox_inches='tight', facecolor='white')
             plt.close(fig)
 
-            return f"✓ Plot saved successfully to:\n{filepath}", str(filepath)
+            return f"✓ Plot saved successfully to:\n{filepath}"
         except Exception as e:
             self.logger.error(f"Plot save error: {e}")
-            return f"Plot save failed: {str(e)}", None
+            return f"Plot save failed: {str(e)}"
     
     def clear_data(self) -> str:
         """Clear all measurement data."""
@@ -1577,10 +1584,8 @@ class PowerSupplyAutomationGradio:
         # ────────────────────────────────────────────────────────────────────
         # File Export Default Locations
         # ────────────────────────────────────────────────────────────────────
-        # Use the configured paths from the top of the file
         self.save_locations = {
-            'data': PSU_DATA_PATH,          # Data export directory
-            'waveforms': PSU_WAVEFORM_PATH  # Waveform plot files
+            'data': str(Path.cwd() / "psu_data")    # Data export directory
         }
 
     def setup_logging(self):
@@ -2470,25 +2475,29 @@ class PowerSupplyAutomationGradio:
             message
         )
 
-    def export_measurement_data(self, save_path: str):
-        """Export collected measurements to CSV file and return path for download
+    def export_measurement_data(self, save_path: str) -> str:
+        """Export collected measurements to CSV file at user-specified location
 
         Args:
             save_path: Directory path where file should be saved
 
         Returns:
-            Tuple of (status_message, file_path)
+            Status message
         """
         try:
             if not self.measurement_data:
-                return "No measurement data to export", None
+                return "No measurement data to export"
 
             if not save_path or save_path.strip() == "":
-                return "Error: No save location specified", None
+                return "Please select a save location using the Browse button"
 
             # Ensure the save directory exists
             save_dir = Path(save_path)
-            save_dir.mkdir(parents=True, exist_ok=True)
+            if not save_dir.exists():
+                return f"Error: Directory does not exist: {save_path}"
+
+            if not save_dir.is_dir():
+                return f"Error: Path is not a directory: {save_path}"
 
             timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
             filename = f"power_supply_data_{timestamp}.csv"
@@ -2509,11 +2518,11 @@ class PowerSupplyAutomationGradio:
                         ])
 
             self.log_message(f"Data exported to: {filepath}", "SUCCESS")
-            return f"✓ Data exported successfully to:\n{filepath}", str(filepath)
+            return f"✓ Data exported successfully to:\n{filepath}"
 
         except Exception as e:
             self.log_message(f"Export error: {e}", "ERROR")
-            return f"Export error: {e}", None
+            return f"Export error: {e}"
 
     def clear_measurement_data(self) -> str:
         """Clear all collected measurement data"""
@@ -4022,12 +4031,11 @@ class GradioOscilloscopeGUI:
         self.io_lock = threading.RLock()
         self._shutdown_flag = threading.Event()
         self._gradio_interface = None
-
-        # Use the configured paths from the top of the file
+        
         self.save_locations = {
-            'data': OSC_DATA_PATH,              # CSV data files
-            'graphs': OSC_GRAPH_PATH,           # Plot images (PNG)
-            'screenshots': OSC_SCREENSHOT_PATH  # Scope screenshots
+            'data': str(Path.cwd() / "data"),
+            'graphs': str(Path.cwd() / "graphs"),
+            'screenshots': str(Path.cwd() / "screenshots")
         }
         
         self.setup_logging()
@@ -4135,35 +4143,26 @@ class GradioOscilloscopeGUI:
             return "✗ Connection test: FAILED - Not connected"
 
     # Channel configuration
-    def configure_channel(self, ch1, ch1_v_scale, ch1_v_offset, ch1_coupling, ch1_probe,
-                         ch2, ch2_v_scale, ch2_v_offset, ch2_coupling, ch2_probe,
-                         ch3, ch3_v_scale, ch3_v_offset, ch3_coupling, ch3_probe,
-                         ch4, ch4_v_scale, ch4_v_offset, ch4_coupling, ch4_probe):
-        """Configure vertical parameters for selected channels with individual settings"""
+    def configure_channel(self, ch1, ch2, ch3, ch4, v_scale, v_offset, coupling, probe):
+        """Configure vertical parameters for selected channels"""
         if not self.oscilloscope or not self.oscilloscope.is_connected:
             return "Error: Not connected"
 
-        # Channel configuration data
-        channel_configs = {
-            1: {'enabled': ch1, 'v_scale': ch1_v_scale, 'v_offset': ch1_v_offset, 'coupling': ch1_coupling, 'probe': ch1_probe},
-            2: {'enabled': ch2, 'v_scale': ch2_v_scale, 'v_offset': ch2_v_offset, 'coupling': ch2_coupling, 'probe': ch2_probe},
-            3: {'enabled': ch3, 'v_scale': ch3_v_scale, 'v_offset': ch3_v_offset, 'coupling': ch3_coupling, 'probe': ch3_probe},
-            4: {'enabled': ch4, 'v_scale': ch4_v_scale, 'v_offset': ch4_v_offset, 'coupling': ch4_coupling, 'probe': ch4_probe}
-        }
+        channel_states = {1: ch1, 2: ch2, 3: ch3, 4: ch4}
 
         try:
             success_count = 0
             disabled_count = 0
 
-            for channel, config in channel_configs.items():
+            for channel, enabled in channel_states.items():
                 with self.io_lock:
-                    if config['enabled']:
+                    if enabled:
                         success = self.oscilloscope.configure_channel(
                             channel=channel,
-                            vertical_scale=config['v_scale'],
-                            vertical_offset=config['v_offset'],
-                            coupling=config['coupling'],
-                            probe_attenuation=config['probe']
+                            vertical_scale=v_scale,
+                            vertical_offset=v_offset,
+                            coupling=coupling,
+                            probe_attenuation=probe
                         )
                         if success:
                             success_count += 1
@@ -4723,47 +4722,47 @@ class GradioOscilloscopeGUI:
     def capture_screenshot(self):
         """Capture and save display screenshot to the configured save location"""
         if not self.oscilloscope or not self.oscilloscope.is_connected:
-            return "Error: Not connected", None
+            return "Error: Not connected"
 
         try:
             # Ensure the save directory exists
             screenshot_dir = Path(self.save_locations['screenshots'])
             screenshot_dir.mkdir(parents=True, exist_ok=True)
-
+            
             # Generate a timestamp and filename
             timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
             filename = f"scope_screenshot_{timestamp}.png"
-
+            
             # Create the full path for the screenshot
             screenshot_path = screenshot_dir / filename
-
+            
             # Get the screenshot data directly
             if not hasattr(self.oscilloscope, '_scpi_wrapper'):
-                return "Error: Oscilloscope SCPI interface not available", None
-
+                return "Error: Oscilloscope SCPI interface not available"
+                
             # Get the screenshot data
             try:
                 image_data = self.oscilloscope._scpi_wrapper.query_binary_values(
                     ":DISPlay:DATA? PNG",
                     datatype='B'
                 )
-
+                
                 if image_data:
                     # Save the screenshot to the desired location
                     with open(screenshot_path, 'wb') as f:
                         f.write(bytes(image_data))
                     self.logger.info(f"Screenshot saved to: {screenshot_path}")
-                    return f"✓ Screenshot saved: {screenshot_path}", str(screenshot_path)
+                    return f"✓ Screenshot saved: {screenshot_path}"
                 else:
-                    return "Screenshot capture failed: No data received", None
-
+                    return "Screenshot capture failed: No data received"
+                    
             except Exception as e:
                 self.logger.error(f"Error capturing screenshot: {str(e)}")
-                return f"Error capturing screenshot: {str(e)}", None
+                return f"Error capturing screenshot: {str(e)}"
 
         except Exception as e:
             self.logger.error(f"Screenshot save error: {e}")
-            return f"Error: {str(e)}", None
+            return f"Error: {str(e)}"
 
     def acquire_data(self, ch1, ch2, ch3, ch4, math1, math2, math3, math4):
         """Acquire waveform data from selected channels and math functions"""
@@ -4812,64 +4811,55 @@ class GradioOscilloscopeGUI:
         except Exception as e:
             return f"Error: {str(e)}"
 
-    def export_csv(self, save_path: str = None):
+    def export_csv(self, save_path: str):
         """Export acquired waveform data to CSV files at user-specified location
 
         Args:
-            save_path: Directory path where files should be saved (optional, defaults to configured location)
+            save_path: Directory path where files should be saved
 
         Returns:
-            Tuple of (status message, list of file paths)
+            Status message
         """
         if not self.last_acquired_data:
-            return "Error: No data available", None
+            return "Error: No data available"
         if not self.data_acquisition:
-            return "Error: Not initialized", None
+            return "Error: Not initialized"
 
-        # Use default save location if no path provided
         if not save_path or save_path.strip() == "":
-            save_path = self.save_locations['data']
+            return "Please select a save location using the Browse button"
 
         # Verify path exists and is a directory
         save_dir = Path(save_path)
         if not save_dir.exists():
-            # Try to create directory if it doesn't exist
-            try:
-                save_dir.mkdir(parents=True, exist_ok=True)
-            except Exception as e:
-                return f"Error: Could not create directory: {save_path} - {str(e)}", None
+            return f"Error: Directory does not exist: {save_path}"
         if not save_dir.is_dir():
-            return f"Error: Path is not a directory: {save_path}", None
+            return f"Error: Path is not a directory: {save_path}"
 
         try:
             exported_files = []
-            exported_file_paths = []
             if isinstance(self.last_acquired_data, dict):
                 for source_key, data in self.last_acquired_data.items():
                     filename = self.data_acquisition.export_to_csv(data, custom_path=save_path)
                     if filename:
                         exported_files.append(Path(filename).name)
-                        exported_file_paths.append(str(filename))
 
             if exported_files:
-                status_msg = f"✓ Exported {len(exported_files)} file(s) successfully to:\n{save_path}\n\nFiles: {', '.join(exported_files)}"
-                return status_msg, exported_file_paths
+                return f"✓ Exported {len(exported_files)} file(s) successfully to:\n{save_path}\n\nFiles: {', '.join(exported_files)}"
             else:
-                return "Export failed", None
+                return "Export failed"
         except Exception as e:
-            return f"Error: {str(e)}", None
+            return f"Error: {str(e)}"
 
     def generate_plot(self, plot_title):
         """Generate waveform plot with measurements"""
         if not self.last_acquired_data:
-            return "Error: No data available", None
+            return "Error: No data available"
         if not self.data_acquisition:
-            return "Error: Not initialized", None
+            return "Error: Not initialized"
 
         try:
             custom_title = plot_title.strip() or None
             plot_files = []
-            plot_file_paths = []
             if isinstance(self.last_acquired_data, dict):
                 for source_key, data in self.last_acquired_data.items():
                     if custom_title:
@@ -4882,14 +4872,13 @@ class GradioOscilloscopeGUI:
                         data, custom_path=self.save_locations['graphs'], plot_title=channel_title)
                     if filename:
                         plot_files.append(Path(filename).name)
-                        plot_file_paths.append(str(filename))
 
             if plot_files:
-                return f"Generated: {', '.join(plot_files)}", plot_file_paths
+                return f"Generated: {', '.join(plot_files)}"
             else:
-                return "Failed", None
+                return "Failed"
         except Exception as e:
-            return f"Error: {str(e)}", None
+            return f"Error: {str(e)}"
 
     def perform_autoscale(self):
         """Execute automatic vertical and horizontal scaling"""
@@ -4958,9 +4947,9 @@ class GradioOscilloscopeGUI:
     def run_full_automation(self, ch1, ch2, ch3, ch4, math1, math2, math3, math4, plot_title):
         """Execute complete acquisition, export, and analysis workflow"""
         if not self.oscilloscope or not self.oscilloscope.is_connected:
-            return "Error: Not connected", None, None, None
+            return "Error: Not connected"
         if not self.data_acquisition:
-            return "Error: Not initialized", None, None, None
+            return "Error: Not initialized"
 
         selected_channels = []
         if ch1:
@@ -4981,13 +4970,10 @@ class GradioOscilloscopeGUI:
             selected_channels.append(('MATH', 4))
 
         if not selected_channels:
-            return "Error: No channels/math functions selected", None, None, None
+            return "Error: No channels/math functions selected"
 
         try:
             results = []
-            screenshot_file = None
-            csv_files = []
-            plot_files = []
             results.append("Preparing automation...")
 
             # CRITICAL: Stop oscilloscope to freeze the waveform
@@ -5023,22 +5009,24 @@ class GradioOscilloscopeGUI:
                     results.append("⚠ Oscilloscope resumed after error")
                 except:
                     pass
-                return "Error: Data acquisition failed", None, None, None
+                return "Error: Data acquisition failed"
 
             results.append("\nStep 2/4: Exporting CSV...")
+            csv_files = []
             for source_key, data in all_channel_data.items():
                 csv_file = self.data_acquisition.export_to_csv(
                     data,
                     custom_path=self.save_locations['data']
                 )
                 if csv_file:
-                    csv_files.append(str(csv_file))
+                    csv_files.append(Path(csv_file).name)
 
             if csv_files:
                 results.append(f" ✓ {len(csv_files)} files exported to: {self.save_locations['data']}")
 
             results.append("\nStep 3/4: Generating plots...")
             custom_title = plot_title.strip() or None
+            plot_files = []
             for source_key, data in all_channel_data.items():
                 if custom_title:
                     source_label = "Math" if data['is_math'] else "Channel"
@@ -5052,7 +5040,7 @@ class GradioOscilloscopeGUI:
                     plot_title=channel_title
                 )
                 if plot_file:
-                    plot_files.append(str(plot_file))
+                    plot_files.append(Path(plot_file).name)
 
             if plot_files:
                 results.append(f" ✓ {len(plot_files)} plots generated to: {self.save_locations['graphs']}")
@@ -5078,7 +5066,6 @@ class GradioOscilloscopeGUI:
                     if image_data:
                         with open(screenshot_path, 'wb') as f:
                             f.write(bytes(image_data))
-                        screenshot_file = str(screenshot_path)
                         results.append(f"✓ Screenshot saved: {screenshot_path}")
                     else:
                         results.append("⚠ Screenshot capture failed: No data")
@@ -5108,7 +5095,7 @@ class GradioOscilloscopeGUI:
             results.append(f"  • Data: {self.save_locations['data']}")
             results.append(f"  • Graphs: {self.save_locations['graphs']}")
 
-            return "\n".join(results), screenshot_file, csv_files, plot_files
+            return "\n".join(results)
         except Exception as e:
             # Ensure oscilloscope is resumed even if there's an error
             try:
@@ -5117,7 +5104,7 @@ class GradioOscilloscopeGUI:
             except:
                 pass
             self.logger.error(f"Automation error: {e}")
-            return f"Automation error: {str(e)}", None, None, None
+            return f"Automation error: {str(e)}"
 
     def browse_folder(self, current_path, _folder_type="folder"):
         """
@@ -5284,10 +5271,45 @@ class UnifiedInstrumentControl:
             ),
             css=self._css  # Apply the custom CSS styles defined above
         ) as interface:
-            gr.Markdown("# DIGANTARA Unified Lab Instrument Control")
-            gr.Markdown("**Developed by: Anirudh Iyengar** | Digantara Research and Technologies Pvt. Ltd.")
-            gr.Markdown("Professional control interface for multiple lab instruments")
-            
+            # ═══════════════════════════════════════════════════════════════════
+            # HEADER WITH COMPANY LOGO - CUSTOMIZATION SECTION
+            # ═══════════════════════════════════════════════════════════════════
+            # This section displays your company logo alongside the title
+            # Modify the values below to customize appearance
+            # ═══════════════════════════════════════════════════════════════════
+
+            with gr.Row():
+                # ─────────────────────────────────────────────────────────────
+                # LOGO COLUMN - Controls logo display
+                # ─────────────────────────────────────────────────────────────
+                with gr.Column(scale=1):  # scale=1 means logo takes 1/5 of width
+                                          # Try: scale=2 for wider logo area
+                    gr.Image(
+                        "assets/digantara_logo.png",  # Logo file path
+                                                       # Change if you rename/move logo
+                        show_label=False,              # Hides "Image" label above logo
+                        container=False,               # Removes border around logo
+                        height=80,                     # Logo height in pixels
+                                                       # Try: 60 (smaller), 100 (larger), 120 (much larger)
+                        width=550                      # Logo width in pixels
+                                                       # Try: 150 (narrower), 250 (wider), 300 (much wider)
+                                                       # Note: Maintains aspect ratio if only one dimension set
+                    )
+
+                # ─────────────────────────────────────────────────────────────
+                # TITLE COLUMN - Controls title and subtitle text
+                # ─────────────────────────────────────────────────────────────
+                with gr.Column(scale=5):  # scale=4 means title takes 4/5 of width
+                                          # Try: scale=3 for less space, scale=5 for more space
+                    gr.Markdown("# DIGANTARA Unified Lab Instrument Control")
+                    # ^ Main title - Change text size by changing # to ## (smaller) or leave as # (largest)
+
+                    gr.Markdown("**Developed by: Anirudh Iyengar** | Digantara Research and Technologies Pvt. Ltd.")
+                    # ^ Subtitle line 1 - **text** makes it bold, remove ** for normal weight
+
+                    gr.Markdown("Professional control interface for multiple lab instruments")
+                    # ^ Subtitle line 2 - Edit or remove this line as needed
+
             with gr.Tabs():
                 # DMM Tab
                 with gr.Tab("Digital Multimeter (DMM6500)"):
@@ -5449,29 +5471,34 @@ class UnifiedInstrumentControl:
                 dmm_trend_plot = gr.Plot()
 
                 gr.Markdown("### Save Plot")
-                gr.Textbox(
-                    label="Plot Save Location (Server-Side)",
-                    value=DMM_PLOT_PATH,
-                    interactive=False
-                )
+                with gr.Row():
+                    dmm_plot_save_path = gr.Textbox(
+                        label="Save Location for Plots",
+                        placeholder="Click Browse to select folder...",
+                        interactive=True,
+                        scale=3
+                    )
+                    dmm_plot_browse_btn = gr.Button("Browse", variant="secondary", scale=1)
 
                 dmm_save_plot_btn = gr.Button("Save Plot", variant="primary")
                 dmm_plot_save_status = gr.Textbox(
                     label="Save Status",
                     interactive=False
                 )
-                dmm_plot_download = gr.File(label="Download Saved Plot", interactive=False)
 
         # Data Export Tab
         with gr.Row():
             with gr.Column():
                 gr.Markdown("### Export Measurement Data")
 
-                gr.Textbox(
-                    label="Export Save Location (Server-Side)",
-                    value=DMM_DATA_PATH,
-                    interactive=False
-                )
+                with gr.Row():
+                    dmm_export_path = gr.Textbox(
+                        label="Save Location",
+                        placeholder="Click Browse to select folder...",
+                        interactive=True,
+                        scale=3
+                    )
+                    dmm_export_browse_btn = gr.Button("Browse", variant="secondary", scale=1)
 
                 dmm_export_format = gr.Dropdown(
                     label="Export Format",
@@ -5484,7 +5511,6 @@ class UnifiedInstrumentControl:
                     label="Export Status",
                     interactive=False
                 )
-                dmm_data_download = gr.File(label="Download Exported Data", interactive=False)
 
                 gr.Markdown("### Data Preview")
                 dmm_data_preview = gr.Dataframe(
@@ -5570,20 +5596,20 @@ class UnifiedInstrumentControl:
             outputs=[dmm_trend_plot]
         )
 
-        # Note: Browse buttons removed - files save to configured server paths
-        # Download components allow users to get files after generation
+        # Note: Browse buttons removed - users should manually type/paste paths in the textboxes
+        # The export path and plot save path textboxes are directly editable by the user
 
         # Save plot button
         dmm_save_plot_btn.click(
             fn=self.dmm_controller.save_trend_plot,
-            inputs=[gr.State(DMM_PLOT_PATH), dmm_plot_points],
-            outputs=[dmm_plot_save_status, dmm_plot_download]
+            inputs=[dmm_plot_save_path, dmm_plot_points],
+            outputs=[dmm_plot_save_status]
         )
 
         dmm_export_btn.click(
             self.dmm_controller.export_data,
-            inputs=[gr.State(DMM_DATA_PATH), dmm_export_format],
-            outputs=[dmm_export_status, dmm_data_download]
+            inputs=[dmm_export_path, dmm_export_format],
+            outputs=[dmm_export_status]
         )
         
         dmm_clear_data_btn.click(
@@ -5742,11 +5768,14 @@ class UnifiedInstrumentControl:
                 psu_auto_measure_cb = gr.Checkbox(label="Enable Auto-Measurement", value=False)
                 psu_measure_interval = gr.Slider(0.5, 60, value=2.0, label="Interval (seconds)", step=0.5)
 
-            gr.Textbox(
-                label="Export Save Location (Server-Side)",
-                value=PSU_DATA_PATH,
-                interactive=False
-            )
+            with gr.Row():
+                psu_export_path = gr.Textbox(
+                    label="Save Location",
+                    placeholder="Click Browse to select folder...",
+                    interactive=True,
+                    scale=3
+                )
+                psu_export_browse_btn = gr.Button("Browse", variant="secondary", scale=1)
 
             with gr.Row():
                 psu_export_btn = gr.Button("Export to CSV", variant="primary")
@@ -5756,17 +5785,16 @@ class UnifiedInstrumentControl:
                 label="Export Status",
                 interactive=False
             )
-            psu_data_download = gr.File(label="Download Exported Data", interactive=False)
 
-            # Note: Browse button removed - files save to configured server paths
-            # Download component allows users to get files after generation
+            # Note: Browse button removed - users should manually type/paste path in the textbox
+            # The export path textbox is directly editable by the user
 
             psu_auto_measure_cb.change(fn=self.psu_controller.toggle_auto_measure, inputs=psu_auto_measure_cb)
 
             psu_export_btn.click(
                 fn=self.psu_controller.export_measurement_data,
-                inputs=[gr.State(PSU_DATA_PATH)],
-                outputs=[psu_export_status, psu_data_download]
+                inputs=[psu_export_path],
+                outputs=[psu_export_status]
             )
             psu_clear_btn.click(fn=self.psu_controller.clear_measurement_data)
 
@@ -5916,7 +5944,7 @@ class UnifiedInstrumentControl:
                         psu_ch1_voltage = gr.Slider(0.1, 30.0, value=3.0, label="Target Voltage (V)", step=0.1)
                         psu_ch1_current = gr.Slider(0.001, 3.0, value=0.1, label="Current Limit (A)", step=0.001)
                     with gr.Row():
-                        psu_ch1_cycles = gr.Number(value=3, label="Cycles", minimum=1, maximum=100, precision=0)
+                        psu_ch1_cycles = gr.Number(value=3, label="Cycles", minimum=1, maximum=1000, precision=0)
                         psu_ch1_points = gr.Number(value=50, label="Points/Cycle", minimum=1, maximum=1000, precision=0)
                         psu_ch1_duration = gr.Number(value=8.0, label="Cycle Duration (s)", minimum=0.1, maximum=60)
 
@@ -5932,7 +5960,7 @@ class UnifiedInstrumentControl:
                         psu_ch2_voltage = gr.Slider(0.1, 30.0, value=2.5, label="Target Voltage (V)", step=0.1)
                         psu_ch2_current = gr.Slider(0.001, 3.0, value=0.1, label="Current Limit (A)", step=0.001)
                     with gr.Row():
-                        psu_ch2_cycles = gr.Number(value=3, label="Cycles", minimum=1, maximum=100, precision=0)
+                        psu_ch2_cycles = gr.Number(value=3, label="Cycles", minimum=1, maximum=1000, precision=0)
                         psu_ch2_points = gr.Number(value=50, label="Points/Cycle", minimum=1, maximum=1000, precision=0)
                         psu_ch2_duration = gr.Number(value=8.0, label="Cycle Duration (s)", minimum=0.1, maximum=60)
 
@@ -5949,7 +5977,7 @@ class UnifiedInstrumentControl:
                         psu_ch3_voltage = gr.Slider(0.1, 5.0, value=3.3, label="Target Voltage (V)", step=0.1)
                         psu_ch3_current = gr.Slider(0.001, 3.0, value=0.1, label="Current Limit (A)", step=0.001)
                     with gr.Row():
-                        psu_ch3_cycles = gr.Number(value=3, label="Cycles", minimum=1, maximum=100, precision=0)
+                        psu_ch3_cycles = gr.Number(value=3, label="Cycles", minimum=1, maximum=1000, precision=0)
                         psu_ch3_points = gr.Number(value=50, label="Points/Cycle", minimum=1, maximum=1000, precision=0)
                         psu_ch3_duration = gr.Number(value=8.0, label="Cycle Duration (s)", minimum=0.1, maximum=60)
 
@@ -6117,18 +6145,20 @@ class UnifiedInstrumentControl:
             psu_waveform_plot = gr.Plot(label="Multi-Channel Waveform Preview")
 
             gr.Markdown("### Save Waveform Plot")
-            gr.Textbox(
-                label="Waveform Plot Save Location (Server-Side)",
-                value=PSU_WAVEFORM_PATH,
-                interactive=False
-            )
+            with gr.Row():
+                psu_waveform_save_path = gr.Textbox(
+                    label="Save Location for Waveform Plots",
+                    placeholder="Click Browse to select folder...",
+                    interactive=True,
+                    scale=3
+                )
+                psu_waveform_browse_btn = gr.Button("Browse", variant="secondary", scale=1)
 
             psu_save_waveform_btn = gr.Button("Save Multi-Channel Waveform Plot", variant="primary")
             psu_waveform_save_status = gr.Textbox(
                 label="Save Status",
                 interactive=False
             )
-            psu_waveform_download = gr.File(label="Download Waveform Plot", interactive=False)
 
             # ════════════════════════════════════════════════════════════════
             # MULTI-CHANNEL WAVEFORM EVENT HANDLERS (FIXED)
@@ -6224,21 +6254,23 @@ class UnifiedInstrumentControl:
                     return fig
 
             def save_waveform_plot(save_path):
-                """Save the LIVE execution data graph and return path for download"""
+                """Save the LIVE execution data graph (measured data from actual waveform run)"""
                 try:
                     if not save_path or save_path.strip() == "":
-                        return "ERROR: No save location specified", None
+                        return "ERROR: Please select a save location first"
 
                     from pathlib import Path
                     import matplotlib.pyplot as plt
                     from datetime import datetime
 
                     save_dir = Path(save_path)
-                    save_dir.mkdir(parents=True, exist_ok=True)
+
+                    if not save_dir.exists():
+                        return f"ERROR: Directory does not exist: {save_path}"
 
                     # Check if we have actual execution data
                     if not hasattr(self.psu_controller, 'ramping_data') or not self.psu_controller.ramping_data:
-                        return "ERROR: No execution data to save. Run a waveform first to collect live data.", None
+                        return "ERROR: No execution data to save. Run a waveform first to collect live data."
 
                     # We have execution data - create a plot from the LIVE measured data
                     data = self.psu_controller.ramping_data
@@ -6257,7 +6289,7 @@ class UnifiedInstrumentControl:
                     # Create figure with subplots
                     num_channels = len(channels_data)
                     if num_channels == 0:
-                        return "ERROR: No channel data found in execution results.", None
+                        return "ERROR: No channel data found in execution results."
 
                     fig, axes = plt.subplots(num_channels, 2, figsize=(16, 5 * num_channels), squeeze=False)
 
@@ -6304,11 +6336,11 @@ class UnifiedInstrumentControl:
                     fig.savefig(filepath, dpi=300, bbox_inches='tight', facecolor='white')
                     plt.close(fig)
 
-                    return f"✓ LIVE data saved to:\n{filepath}\n({len(data)} points, {num_channels} channel(s))", str(filepath)
+                    return f"✓ LIVE data saved to:\n{filepath}\n({len(data)} points, {num_channels} channel(s))"
 
                 except Exception as e:
                     import traceback
-                    return f"ERROR saving plot: {str(e)}", None
+                    return f"ERROR saving plot: {str(e)}"
 
             def start_multi_channel_waveform(
                 ch1_en, ch1_wf, ch1_v, ch1_i, ch1_cyc, ch1_pts, ch1_dur,
@@ -6395,14 +6427,14 @@ class UnifiedInstrumentControl:
                 outputs=[psu_waveform_status]
             )
 
-            # Note: Browse button removed - files save to configured server paths
-            # Download component allows users to get files after generation
+            # Note: Browse button removed - users should manually type/paste path in the textbox
+            # The waveform save path textbox is directly editable by the user
 
             # Save waveform plot button - uses the new save_waveform_plot function
             psu_save_waveform_btn.click(
                 fn=save_waveform_plot,
-                inputs=[gr.State(PSU_WAVEFORM_PATH)],
-                outputs=[psu_waveform_save_status, psu_waveform_download]
+                inputs=[psu_waveform_save_path],
+                outputs=[psu_waveform_save_status]
             )
 
         # Status & Activity Log
@@ -6501,71 +6533,26 @@ class UnifiedInstrumentControl:
 
         with gr.Tab("Channel Configuration"):
             gr.Markdown("### Channel Selection and Configuration")
-
-            # Channel 1
             with gr.Row():
                 osc_ch1_select = gr.Checkbox(label="Ch1", value=True)
-                osc_ch1_v_scale = gr.Number(label="V/div", value=1.0)
-                osc_ch1_v_offset = gr.Number(label="Offset (V)", value=0.0)
-                osc_ch1_coupling = gr.Dropdown(
-                    label="Coupling",
-                    choices=["AC", "DC"],
-                    value="DC"
-                )
-                osc_ch1_probe = gr.Dropdown(
-                    label="Probe",
-                    choices=[("1x", 1.0), ("10x", 10.0), ("100x", 100.0)],
-                    value=1.0
-                )
-
-            # Channel 2
-            with gr.Row():
                 osc_ch2_select = gr.Checkbox(label="Ch2", value=False)
-                osc_ch2_v_scale = gr.Number(label="V/div", value=1.0)
-                osc_ch2_v_offset = gr.Number(label="Offset (V)", value=0.0)
-                osc_ch2_coupling = gr.Dropdown(
-                    label="Coupling",
-                    choices=["AC", "DC"],
-                    value="DC"
-                )
-                osc_ch2_probe = gr.Dropdown(
-                    label="Probe",
-                    choices=[("1x", 1.0), ("10x", 10.0), ("100x", 100.0)],
-                    value=1.0
-                )
-
-            # Channel 3
-            with gr.Row():
                 osc_ch3_select = gr.Checkbox(label="Ch3", value=False)
-                osc_ch3_v_scale = gr.Number(label="V/div", value=1.0)
-                osc_ch3_v_offset = gr.Number(label="Offset (V)", value=0.0)
-                osc_ch3_coupling = gr.Dropdown(
-                    label="Coupling",
-                    choices=["AC", "DC"],
-                    value="DC"
-                )
-                osc_ch3_probe = gr.Dropdown(
-                    label="Probe",
-                    choices=[("1x", 1.0), ("10x", 10.0), ("100x", 100.0)],
-                    value=1.0
-                )
-
-            # Channel 4
-            with gr.Row():
                 osc_ch4_select = gr.Checkbox(label="Ch4", value=False)
-                osc_ch4_v_scale = gr.Number(label="V/div", value=1.0)
-                osc_ch4_v_offset = gr.Number(label="Offset (V)", value=0.0)
-                osc_ch4_coupling = gr.Dropdown(
+            
+            with gr.Row():
+                osc_v_scale = gr.Number(label="V/div", value=1.0)
+                osc_v_offset = gr.Number(label="Offset (V)", value=0.0)
+                osc_coupling = gr.Dropdown(
                     label="Coupling",
                     choices=["AC", "DC"],
                     value="DC"
                 )
-                osc_ch4_probe = gr.Dropdown(
+                osc_probe = gr.Dropdown(
                     label="Probe",
                     choices=[("1x", 1.0), ("10x", 10.0), ("100x", 100.0)],
                     value=1.0
                 )
-
+            
             osc_config_channel_btn = gr.Button("Configure Channels", variant="primary")
             osc_channel_status = gr.Textbox(label="Status", interactive=False)
             
@@ -6927,26 +6914,35 @@ class UnifiedInstrumentControl:
         # Operations & File Management Tab
         with gr.Tab("Operations & File Management"):
             with gr.Column(variant="panel"):
-                gr.Markdown("### File Save Locations (Server-Side)")
-                gr.Markdown("Files are saved on the server in the following directories. Use the download buttons below to get files after generation.")
-
-                # Display-only path information
-                with gr.Group():
-                    gr.Textbox(
-                        label="Data Directory (CSV files)",
-                        value=OSC_DATA_PATH,
-                        interactive=False
+                gr.Markdown("### File Save Locations")
+                
+                with gr.Row():
+                    osc_data_path = gr.Textbox(
+                        label="Data Directory",
+                        value=self.oscilloscope_controller.save_locations['data'],
+                        scale=4
                     )
-                    gr.Textbox(
-                        label="Graphs Directory (PNG files)",
-                        value=OSC_GRAPH_PATH,
-                        interactive=False
+                    osc_data_browse_btn = gr.Button("Browse", scale=1)
+                
+                with gr.Row():
+                    osc_graphs_path = gr.Textbox(
+                        label="Graphs Directory",
+                        value=self.oscilloscope_controller.save_locations['graphs'],
+                        scale=4
                     )
-                    gr.Textbox(
-                        label="Screenshots Directory (PNG files)",
-                        value=OSC_SCREENSHOT_PATH,
-                        interactive=False
+                    osc_graphs_browse_btn = gr.Button("Browse", scale=1)
+                
+                with gr.Row():
+                    osc_screenshots_path = gr.Textbox(
+                        label="Screenshots Directory",
+                        value=self.oscilloscope_controller.save_locations['screenshots'],
+                        scale=4
                     )
+                    osc_screenshots_browse_btn = gr.Button("Browse", scale=1)
+                
+                with gr.Row():
+                    osc_update_paths_btn = gr.Button("Update Paths", variant="primary")
+                    osc_path_status = gr.Textbox(label="Path Status", interactive=False, scale=4)
             
             # Data Acquisition and Export section
             gr.Markdown("### Data Acquisition and Export")
@@ -6963,6 +6959,15 @@ class UnifiedInstrumentControl:
                 osc_op_math3 = gr.Checkbox(label="Math3", value=False)
                 osc_op_math4 = gr.Checkbox(label="Math4", value=False)
 
+            with gr.Row():
+                osc_export_path = gr.Textbox(
+                    label="Export Save Location",
+                    placeholder="Click Browse to select folder...",
+                    interactive=True,
+                    scale=3
+                )
+                osc_export_browse_btn = gr.Button("Browse", variant="secondary", scale=1)
+
             osc_plot_title_input = gr.Textbox(
                 label="Plot Title (optional)",
                 placeholder="Enter custom plot title"
@@ -6978,15 +6983,6 @@ class UnifiedInstrumentControl:
                 osc_full_auto_btn = gr.Button("Full Automation", variant="primary", scale=2)
 
             osc_operation_status = gr.Textbox(label="Operation Status", interactive=False, lines=10)
-
-            # Download section
-            gr.Markdown("### Download Files")
-            gr.Markdown("After capturing screenshots or exporting data, download the files below:")
-
-            with gr.Row():
-                osc_screenshot_download = gr.File(label="Latest Screenshot", interactive=False)
-                osc_csv_download = gr.File(label="Exported CSV Files", interactive=False, file_count="multiple")
-                osc_plot_download = gr.File(label="Generated Plots", interactive=False, file_count="multiple")
         
         # Connect UI events to controller methods
         osc_connect_btn.click(
@@ -7009,12 +7005,7 @@ class UnifiedInstrumentControl:
         
         osc_config_channel_btn.click(
             fn=self.oscilloscope_controller.configure_channel,
-            inputs=[
-                osc_ch1_select, osc_ch1_v_scale, osc_ch1_v_offset, osc_ch1_coupling, osc_ch1_probe,
-                osc_ch2_select, osc_ch2_v_scale, osc_ch2_v_offset, osc_ch2_coupling, osc_ch2_probe,
-                osc_ch3_select, osc_ch3_v_scale, osc_ch3_v_offset, osc_ch3_coupling, osc_ch3_probe,
-                osc_ch4_select, osc_ch4_v_scale, osc_ch4_v_offset, osc_ch4_coupling, osc_ch4_probe
-            ],
+            inputs=[osc_ch1_select, osc_ch2_select, osc_ch3_select, osc_ch4_select, osc_v_scale, osc_v_offset, osc_coupling, osc_probe],
             outputs=[osc_channel_status]
         )
         
@@ -7204,37 +7195,84 @@ class UnifiedInstrumentControl:
             outputs=[osc_wgen2_status]
         )
 
-        # Note: Browse buttons and path editing removed - files always save to configured server paths
-        # Download components allow users to get files after generation
-
+        # Define path update functions
+        def osc_update_paths(data, graphs, screenshots):
+            self.oscilloscope_controller.save_locations['data'] = data
+            self.oscilloscope_controller.save_locations['graphs'] = graphs
+            self.oscilloscope_controller.save_locations['screenshots'] = screenshots
+            return "Paths updated successfully"
+        
+        def osc_browse_data_folder(current_path):
+            new_path = self.oscilloscope_controller.browse_folder(current_path, "Data")
+            self.oscilloscope_controller.save_locations['data'] = new_path
+            return new_path, f"Data directory updated to: {new_path}"
+        
+        def osc_browse_graphs_folder(current_path):
+            new_path = self.oscilloscope_controller.browse_folder(current_path, "Graphs")
+            self.oscilloscope_controller.save_locations['graphs'] = new_path
+            return new_path, f"Graphs directory updated to: {new_path}"
+        
+        def osc_browse_screenshots_folder(current_path):
+            new_path = self.oscilloscope_controller.browse_folder(current_path, "Screenshots")
+            self.oscilloscope_controller.save_locations['screenshots'] = new_path
+            return new_path, f"Screenshots directory updated to: {new_path}"
+        
+        # Connect the buttons to their functions
+        osc_update_paths_btn.click(
+            fn=osc_update_paths,
+            inputs=[osc_data_path, osc_graphs_path, osc_screenshots_path],
+            outputs=[osc_path_status]
+        )
+        
+        osc_data_browse_btn.click(
+            fn=osc_browse_data_folder,
+            inputs=[osc_data_path],
+            outputs=[osc_data_path, osc_path_status]
+        )
+        
+        osc_graphs_browse_btn.click(
+            fn=osc_browse_graphs_folder,
+            inputs=[osc_graphs_path],
+            outputs=[osc_graphs_path, osc_path_status]
+        )
+        
+        osc_screenshots_browse_btn.click(
+            fn=osc_browse_screenshots_folder,
+            inputs=[osc_screenshots_path],
+            outputs=[osc_screenshots_path, osc_path_status]
+        )
+        
         osc_screenshot_btn.click(
             fn=self.oscilloscope_controller.capture_screenshot,
             inputs=[],
-            outputs=[osc_operation_status, osc_screenshot_download]
+            outputs=[osc_operation_status]
         )
-
+        
         osc_acquire_btn.click(
             fn=self.oscilloscope_controller.acquire_data,
             inputs=[osc_op_ch1, osc_op_ch2, osc_op_ch3, osc_op_ch4, osc_op_math1, osc_op_math2, osc_op_math3, osc_op_math4],
             outputs=[osc_operation_status]
         )
 
+        # Note: Browse button removed - users should manually type/paste path in the textbox
+        # The export path textbox is directly editable by the user
+
         osc_export_btn.click(
             fn=self.oscilloscope_controller.export_csv,
-            inputs=[],
-            outputs=[osc_operation_status, osc_csv_download]
+            inputs=[osc_export_path],
+            outputs=[osc_operation_status]
         )
-
+        
         osc_plot_btn.click(
             fn=self.oscilloscope_controller.generate_plot,
             inputs=[osc_plot_title_input],
-            outputs=[osc_operation_status, osc_plot_download]
+            outputs=[osc_operation_status]
         )
-
+        
         osc_full_auto_btn.click(
             fn=self.oscilloscope_controller.run_full_automation,
             inputs=[osc_op_ch1, osc_op_ch2, osc_op_ch3, osc_op_ch4, osc_op_math1, osc_op_math2, osc_op_math3, osc_op_math4, osc_plot_title_input],
-            outputs=[osc_operation_status, osc_screenshot_download, osc_csv_download, osc_plot_download]
+            outputs=[osc_operation_status]
         )
 
     def launch(self, share=False, server_port=7860, auto_open=True):
