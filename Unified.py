@@ -114,9 +114,9 @@ PSU_DATA_PATH = r"C:\Users\AnirudhIyengar\Desktop\psu_data"
 PSU_WAVEFORM_PATH = r"C:\Users\AnirudhIyengar\Desktop\psu_waveforms"
 
 # Oscilloscope data export paths
-OSC_DATA_PATH = r"C:\Users\AnirudhIyengar\Desktop\oscilloscope_data"
-OSC_GRAPH_PATH = r"C:\Users\AnirudhIyengar\Desktop\oscilloscope_graphs"
-OSC_SCREENSHOT_PATH = r"C:\Users\AnirudhIyengar\Desktop\oscilloscope_screenshots"
+OSC_DATA_PATH = r"C:\Users\AnirudhIyengar\Downloads\test\Data"
+OSC_GRAPH_PATH = r"C:\Users\AnirudhIyengar\Downloads\test\Graphs"
+OSC_SCREENSHOT_PATH = r"C:\Users\AnirudhIyengar\Downloads\test\Screenshots"
 
 # =============================================================================
 # END OF CONFIGURATION - DO NOT EDIT BELOW THIS LINE
@@ -4862,13 +4862,14 @@ class GradioOscilloscopeGUI:
     def generate_plot(self, plot_title):
         """Generate waveform plot with measurements"""
         if not self.last_acquired_data:
-            return "Error: No data available"
+            return "Error: No data available", None
         if not self.data_acquisition:
-            return "Error: Not initialized"
+            return "Error: Not initialized", None
 
         try:
             custom_title = plot_title.strip() or None
             plot_files = []
+            plot_file_paths = []
             if isinstance(self.last_acquired_data, dict):
                 for source_key, data in self.last_acquired_data.items():
                     if custom_title:
@@ -4881,13 +4882,14 @@ class GradioOscilloscopeGUI:
                         data, custom_path=self.save_locations['graphs'], plot_title=channel_title)
                     if filename:
                         plot_files.append(Path(filename).name)
+                        plot_file_paths.append(str(filename))
 
             if plot_files:
-                return f"Generated: {', '.join(plot_files)}"
+                return f"Generated: {', '.join(plot_files)}", plot_file_paths
             else:
-                return "Failed"
+                return "Failed", None
         except Exception as e:
-            return f"Error: {str(e)}"
+            return f"Error: {str(e)}", None
 
     def perform_autoscale(self):
         """Execute automatic vertical and horizontal scaling"""
@@ -4956,9 +4958,9 @@ class GradioOscilloscopeGUI:
     def run_full_automation(self, ch1, ch2, ch3, ch4, math1, math2, math3, math4, plot_title):
         """Execute complete acquisition, export, and analysis workflow"""
         if not self.oscilloscope or not self.oscilloscope.is_connected:
-            return "Error: Not connected", None, None
+            return "Error: Not connected", None, None, None
         if not self.data_acquisition:
-            return "Error: Not initialized", None, None
+            return "Error: Not initialized", None, None, None
 
         selected_channels = []
         if ch1:
@@ -4979,12 +4981,13 @@ class GradioOscilloscopeGUI:
             selected_channels.append(('MATH', 4))
 
         if not selected_channels:
-            return "Error: No channels/math functions selected", None, None
+            return "Error: No channels/math functions selected", None, None, None
 
         try:
             results = []
             screenshot_file = None
             csv_files = []
+            plot_files = []
             results.append("Preparing automation...")
 
             # CRITICAL: Stop oscilloscope to freeze the waveform
@@ -5020,7 +5023,7 @@ class GradioOscilloscopeGUI:
                     results.append("⚠ Oscilloscope resumed after error")
                 except:
                     pass
-                return "Error: Data acquisition failed", None, None
+                return "Error: Data acquisition failed", None, None, None
 
             results.append("\nStep 2/4: Exporting CSV...")
             for source_key, data in all_channel_data.items():
@@ -5036,7 +5039,6 @@ class GradioOscilloscopeGUI:
 
             results.append("\nStep 3/4: Generating plots...")
             custom_title = plot_title.strip() or None
-            plot_files = []
             for source_key, data in all_channel_data.items():
                 if custom_title:
                     source_label = "Math" if data['is_math'] else "Channel"
@@ -5050,7 +5052,7 @@ class GradioOscilloscopeGUI:
                     plot_title=channel_title
                 )
                 if plot_file:
-                    plot_files.append(Path(plot_file).name)
+                    plot_files.append(str(plot_file))
 
             if plot_files:
                 results.append(f" ✓ {len(plot_files)} plots generated to: {self.save_locations['graphs']}")
@@ -5106,7 +5108,7 @@ class GradioOscilloscopeGUI:
             results.append(f"  • Data: {self.save_locations['data']}")
             results.append(f"  • Graphs: {self.save_locations['graphs']}")
 
-            return "\n".join(results), screenshot_file, csv_files
+            return "\n".join(results), screenshot_file, csv_files, plot_files
         except Exception as e:
             # Ensure oscilloscope is resumed even if there's an error
             try:
@@ -5115,7 +5117,7 @@ class GradioOscilloscopeGUI:
             except:
                 pass
             self.logger.error(f"Automation error: {e}")
-            return f"Automation error: {str(e)}", None, None
+            return f"Automation error: {str(e)}", None, None, None
 
     def browse_folder(self, current_path, _folder_type="folder"):
         """
@@ -6984,6 +6986,7 @@ class UnifiedInstrumentControl:
             with gr.Row():
                 osc_screenshot_download = gr.File(label="Latest Screenshot", interactive=False)
                 osc_csv_download = gr.File(label="Exported CSV Files", interactive=False, file_count="multiple")
+                osc_plot_download = gr.File(label="Generated Plots", interactive=False, file_count="multiple")
         
         # Connect UI events to controller methods
         osc_connect_btn.click(
@@ -7225,13 +7228,13 @@ class UnifiedInstrumentControl:
         osc_plot_btn.click(
             fn=self.oscilloscope_controller.generate_plot,
             inputs=[osc_plot_title_input],
-            outputs=[osc_operation_status]
+            outputs=[osc_operation_status, osc_plot_download]
         )
 
         osc_full_auto_btn.click(
             fn=self.oscilloscope_controller.run_full_automation,
             inputs=[osc_op_ch1, osc_op_ch2, osc_op_ch3, osc_op_ch4, osc_op_math1, osc_op_math2, osc_op_math3, osc_op_math4, osc_plot_title_input],
-            outputs=[osc_operation_status, osc_screenshot_download, osc_csv_download]
+            outputs=[osc_operation_status, osc_screenshot_download, osc_csv_download, osc_plot_download]
         )
 
     def launch(self, share=False, server_port=7860, auto_open=True):
