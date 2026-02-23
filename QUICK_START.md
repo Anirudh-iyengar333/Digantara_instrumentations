@@ -179,11 +179,83 @@ Example locations:
 
 ---
 
+## All Available GUI Commands
+
+### Main Unified Interface (All 3 Instruments in One)
+
+The easiest way to use all instruments together from one interface:
+
+**Windows - Command Prompt:**
+```bash
+cd "C:\Users\YourName\Desktop\Digantara_instrumentation"
+python Unified.py
+```
+
+**Mac/Linux - Terminal:**
+```bash
+cd ~/Desktop/Digantara_instrumentation
+python3 Unified.py
+```
+
+**This launches:**
+- ✅ Digital Multimeter (DMM6500) Control
+- ✅ Power Supply (2230-30-1) Control
+- ✅ Oscilloscope (DSOX6004A) Control
+- All in one tabbed interface
+
+**Access at:** `http://localhost:7860`
+
+---
+
+### Individual Instrument GUIs (Optional - Advanced Users)
+
+If you want to run individual instruments separately instead of the unified interface:
+
+#### Keithley DMM Automation
+```bash
+python scripts/keithley/keithley_dmm_gradio_automation.py
+```
+
+#### Keithley Power Supply Automation
+```bash
+python scripts/keithley/keithley_power_supply_automation.py
+```
+or
+```bash
+python scripts/keithley/keithley_PSU_gradio_automation.py
+```
+
+#### Keysight Oscilloscope
+```bash
+python scripts/keysight/General\ GUI\ useage/keysight_oscilloscope_gradio.py
+```
+
+#### Keysight DMM
+```bash
+python scripts/keysight/General\ GUI\ useage/keysight_dmm_gradio_gui.py
+```
+
+#### Keysight Power Supply
+```bash
+python scripts/keysight/General\ GUI\ useage/keysight_psu_gradio_gui.py
+```
+
+#### Tektronix Oscilloscope
+```bash
+python scripts/tektronix/tektronix_oscilloscope_gradio_en.py
+```
+
+---
+
+**Recommendation:** Use **Unified.py** for most work - it's cleaner and lets you control all instruments from one interface.
+
+---
+
 ## Using the Interface - Power Supply Example
 
 ### Connecting to Your Power Supply
 
-1. **Find the VISA Address**:
+````1. **Find the VISA Address**:
    - It should be pre-filled in the text box
    - Looks like: `USB0::0x05E6::0x2230::SERIAL::INSTR`
    - If empty, click "Scan for Instruments" (if available) or check instrument label

@@ -1447,6 +1447,13 @@ class DMM_GUI_Controller:
         except Exception as e:
             self.logger.error(f"Status query error: {e}")
             return "Error", "N/A", f"Error: {str(e)}", "N/A"
+    
+    def browse_folder(self, current_path, _folder_type="folder"):
+        """
+        Validate and return the provided path.
+        Note: File browser dialog not implemented - users edit the path textbox directly.
+        """
+        return current_path if current_path else str(Path.cwd())
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -3540,6 +3547,40 @@ class PowerSupplyAutomationGradio:
 
         self.log_message("Multi-channel waveform stop signal sent", "INFO")
         return "Stopping multi-channel waveform..."
+    
+    def browse_folder(self, current_path, _folder_type="folder"):
+        """
+        Open a folder browser dialog and return the selected path.
+        """
+        try:
+            from tkinter import filedialog, Tk
+            # Create a hidden Tkinter window
+            root = Tk()
+            root.withdraw()
+            root.attributes('-topmost', True)
+            
+            # Set initial directory
+            initial_dir = current_path if current_path else str(Path.cwd())
+            if not Path(initial_dir).exists():
+                initial_dir = str(Path.cwd())
+            
+            # Open folder dialog
+            selected_path = filedialog.askdirectory(
+                initialdir=initial_dir,
+                title=f"Select {_folder_type} Directory"
+            )
+            
+            root.destroy()
+            
+            # Return selected path if user didn't cancel
+            if selected_path:
+                return selected_path
+            else:
+                # Return current path if user canceled
+                return current_path if current_path else str(Path.cwd())
+        except Exception as e:
+            self.log_message(f"Folder browser error: {e}", "ERROR")
+            return current_path if current_path else str(Path.cwd())
 
     def create_gradio_interface(self):
         """Create the web interface for power supply control."""
@@ -4789,8 +4830,14 @@ class GradioOscilloscopeGUI:
             return f"Error: {str(e)}"
 
     # Data acquisition
-    def capture_screenshot(self):
-        """Capture and save display screenshot to the configured save location"""
+    def capture_screenshot(self, custom_name: str = None):
+        """Capture and save display screenshot to the configured save location
+        
+        Args:
+            custom_name: Optional custom name for the screenshot (without .png extension)
+                        If provided, will use: custom_name_TIMESTAMP.png
+                        If not provided, will use: scope_screenshot_TIMESTAMP.png
+        """
         if not self.oscilloscope or not self.oscilloscope.is_connected:
             return "Error: Not connected"
 
@@ -4801,7 +4848,12 @@ class GradioOscilloscopeGUI:
             
             # Generate a timestamp and filename
             timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-            filename = f"scope_screenshot_{timestamp}.png"
+            if custom_name and custom_name.strip():
+                # Use custom name with timestamp
+                filename = f"{custom_name.strip()}_{timestamp}.png"
+            else:
+                # Use default name
+                filename = f"scope_screenshot_{timestamp}.png"
             
             # Create the full path for the screenshot
             screenshot_path = screenshot_dir / filename
@@ -5178,11 +5230,37 @@ class GradioOscilloscopeGUI:
 
     def browse_folder(self, current_path, _folder_type="folder"):
         """
-        Validate and return the provided path.
-        Note: Browse dialog removed - users should manually edit the path textbox.
-        When accessing via localhost, users can specify any path on their local machine.
+        Open a folder browser dialog and return the selected path.
         """
-        return current_path if current_path else str(Path.cwd())
+        try:
+            from tkinter import filedialog, Tk
+            # Create a hidden Tkinter window
+            root = Tk()
+            root.withdraw()
+            root.attributes('-topmost', True)
+            
+            # Set initial directory
+            initial_dir = current_path if current_path else str(Path.cwd())
+            if not Path(initial_dir).exists():
+                initial_dir = str(Path.cwd())
+            
+            # Open folder dialog
+            selected_path = filedialog.askdirectory(
+                initialdir=initial_dir,
+                title=f"Select {_folder_type} Directory"
+            )
+            
+            root.destroy()
+            
+            # Return selected path if user didn't cancel
+            if selected_path:
+                return selected_path
+            else:
+                # Return current path if user canceled
+                return current_path if current_path else str(Path.cwd())
+        except Exception as e:
+            self.logger.error(f"Folder browser error: {e}")
+            return current_path if current_path else str(Path.cwd())
 
     def create_interface(self):
         """
@@ -5560,7 +5638,7 @@ class UnifiedInstrumentControl:
                         interactive=True,
                         scale=3
                     )
-                    
+                    dmm_plot_browse_btn = gr.Button("Browse", variant="secondary", scale=1)
 
                 dmm_plot_title = gr.Textbox(
                     label="Plot Title (optional)",
@@ -5586,7 +5664,7 @@ class UnifiedInstrumentControl:
                         interactive=True,
                         scale=3
                     )
-                    
+                    dmm_export_browse_btn = gr.Button("Browse", variant="secondary", scale=1)
 
                 dmm_export_format = gr.Dropdown(
                     label="Export Format",
@@ -5761,6 +5839,27 @@ class UnifiedInstrumentControl:
             update_data_preview,
             outputs=[dmm_data_preview]
         )
+        
+        # Browse button handlers for DMM
+        def dmm_browse_plot_folder(current_path):
+            new_path = self.dmm_controller.browse_folder(current_path, "Plots")
+            return new_path, f"Plot directory updated to: {new_path}"
+        
+        def dmm_browse_export_folder(current_path):
+            new_path = self.dmm_controller.browse_folder(current_path, "Export")
+            return new_path, f"Export directory updated to: {new_path}"
+        
+        dmm_plot_browse_btn.click(
+            fn=dmm_browse_plot_folder,
+            inputs=[dmm_plot_save_path],
+            outputs=[dmm_plot_save_path, dmm_plot_save_status]
+        )
+        
+        dmm_export_browse_btn.click(
+            fn=dmm_browse_export_folder,
+            inputs=[dmm_export_path],
+            outputs=[dmm_export_path, dmm_export_status]
+        )
     
     def create_psu_interface(self):
         """Create the Power Supply interface tab"""
@@ -5911,7 +6010,7 @@ class UnifiedInstrumentControl:
                     interactive=True,
                     scale=3
                 )
-                
+                psu_export_browse_btn = gr.Button("Browse", variant="secondary", scale=1)
 
             with gr.Row():
                 psu_export_btn = gr.Button("Export to CSV", variant="primary")
@@ -5922,8 +6021,16 @@ class UnifiedInstrumentControl:
                 interactive=False
             )
 
-            # Note: Browse button removed - users should manually type/paste path in the textbox
-            # The export path textbox is directly editable by the user
+            # Browse button handler for PSU
+            def psu_browse_export_folder(current_path):
+                new_path = self.psu_controller.browse_folder(current_path, "Export")
+                return new_path, f"Export directory updated to: {new_path}"
+            
+            psu_export_browse_btn.click(
+                fn=psu_browse_export_folder,
+                inputs=[psu_export_path],
+                outputs=[psu_export_path, psu_export_status]
+            )
 
             psu_auto_measure_cb.change(fn=self.psu_controller.toggle_auto_measure, inputs=psu_auto_measure_cb)
 
@@ -7154,6 +7261,11 @@ class UnifiedInstrumentControl:
                 placeholder="Enter custom plot title"
             )
 
+            osc_screenshot_name_input = gr.Textbox(
+                label="Screenshot Name (optional)",
+                placeholder="Enter custom screenshot name (without .png extension)"
+            )
+
             with gr.Row():
                 osc_screenshot_btn = gr.Button("Capture Screenshot", variant="secondary")
                 osc_acquire_btn = gr.Button("Acquire Data", variant="primary")
@@ -7460,9 +7572,19 @@ class UnifiedInstrumentControl:
             outputs=[osc_screenshots_path, osc_path_status]
         )
         
+        def osc_browse_export_folder(current_path):
+            new_path = self.oscilloscope_controller.browse_folder(current_path, "Export")
+            return new_path, f"Export directory updated to: {new_path}"
+        
+        osc_export_browse_btn.click(
+            fn=osc_browse_export_folder,
+            inputs=[osc_export_path],
+            outputs=[osc_export_path, osc_path_status]
+        )
+        
         osc_screenshot_btn.click(
             fn=self.oscilloscope_controller.capture_screenshot,
-            inputs=[],
+            inputs=[osc_screenshot_name_input],
             outputs=[osc_operation_status]
         )
         
