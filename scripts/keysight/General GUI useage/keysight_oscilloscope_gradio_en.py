@@ -84,6 +84,25 @@ import atexit
 import os
 
 import socket
+import errno
+
+# monkey-patch gradio_client to tolerate boolean JSON schemas
+import gradio_client.utils as _gc_utils
+_orig_json_to_py = _gc_utils._json_schema_to_python_type
+_orig_get_type = _gc_utils.get_type
+
+def _json_schema_to_python_type_safe(schema, defs=None):
+    if isinstance(schema, bool):
+        return "Any"
+    return _orig_json_to_py(schema, defs)
+
+def get_type_safe(schema):
+    if isinstance(schema, bool):
+        return "boolean"
+    return _orig_get_type(schema)
+
+_gc_utils._json_schema_to_python_type = _json_schema_to_python_type_safe
+_gc_utils.get_type = get_type_safe
 
 import gradio as gr
 
